@@ -82,7 +82,7 @@
 
 #### On macOS / Linux
 
-\`\`\`bash
+```bash
 # Clone the repository
 git clone https://github.com/santhosht/termivoxed.git
 cd termivoxed
@@ -93,11 +93,11 @@ chmod +x setup.sh
 
 # Run the application
 ./run.sh
-\`\`\`
+```
 
 #### On Windows (Command Prompt)
 
-\`\`\`batch
+```batch
 REM Clone the repository
 git clone https://github.com/santhosht/termivoxed.git
 cd termivoxed
@@ -107,11 +107,11 @@ setup.bat
 
 REM Run the application
 run.bat
-\`\`\`
+```
 
 #### On Windows (PowerShell)
 
-\`\`\`powershell
+```powershell
 # Clone the repository
 git clone https://github.com/santhosht/termivoxed.git
 cd termivoxed
@@ -121,11 +121,11 @@ cd termivoxed
 
 # Run the application
 .\run.ps1
-\`\`\`
+```
 
 ### Manual Installation
 
-\`\`\`bash
+```bash
 # 1. Clone and navigate
 git clone https://github.com/santhosht/termivoxed.git
 cd termivoxed
@@ -147,11 +147,11 @@ cp .env.example .env
 
 # 6. Run the application
 python main.py
-\`\`\`
+```
 
 ### Docker Installation
 
-\`\`\`bash
+```bash
 # Clone the repository
 git clone https://github.com/santhosht/termivoxed.git
 cd termivoxed
@@ -164,11 +164,11 @@ docker exec -it termivoxed /bin/bash
 
 # Run the editor
 python main.py
-\`\`\`
+```
 
 ### Package Installation
 
-\`\`\`bash
+```bash
 # Install as package
 pip install .
 
@@ -176,7 +176,7 @@ pip install .
 termivoxed
 # or
 tvx
-\`\`\`
+```
 
 ---
 
@@ -184,11 +184,11 @@ tvx
 
 ### Starting the Application
 
-\`\`\`bash
+```bash
 python main.py
 # or if installed as package
 termivoxed
-\`\`\`
+```
 
 ### Basic Workflow
 
@@ -221,7 +221,7 @@ Full control over:
 
 Edit `.env` file to customize paths and settings:
 
-\`\`\`bash
+```bash
 # Storage
 STORAGE_DIR=storage
 TEMP_DIR=storage/temp
@@ -239,19 +239,19 @@ BALANCED_CRF=23
 # Audio mixing (volume in dB)
 TTS_VOLUME_BOOST=6
 BGM_VOLUME_REDUCTION=15
-\`\`\`
+```
 
 ### Check Dependencies
 
-\`\`\`bash
+```bash
 python check_dependencies.py
-\`\`\`
+```
 
 ---
 
 ## Project Structure
 
-\`\`\`
+```
 termivoxed/
 ├── main.py              # Entry point
 ├── config.py            # Configuration
@@ -265,7 +265,7 @@ termivoxed/
 ├── run.sh/bat/ps1       # Run scripts
 ├── Dockerfile           # Docker image
 └── docker-compose.yml   # Docker Compose
-\`\`\`
+```
 
 ---
 
@@ -292,7 +292,7 @@ Voice selection works without preview. Update pygame if needed: `pip install --u
 
 Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-\`\`\`bash
+```bash
 # Fork, clone, and create branch
 git clone https://github.com/YOUR_USERNAME/termivoxed.git
 cd termivoxed
@@ -304,7 +304,7 @@ pip install -r requirements-dev.txt
 # Make changes, commit, and push
 git commit -m "Add: feature description"
 git push origin feature/your-feature
-\`\`\`
+```
 
 ---
 
