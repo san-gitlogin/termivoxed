@@ -5,7 +5,7 @@
 **AI Voice-Over Dubbing Tool for Content Creators - Add professional AI voice-overs and styled subtitles to your videos without recording your own voice**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: GNU AGPL v3](https://img.shields.io/badge/License-GNU AGPL v3-yellow.svg)](https://opensource.org/licenses/GNU AGPL v3)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-yellow.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![FFmpeg Required](https://img.shields.io/badge/FFmpeg-Required-red.svg)](https://ffmpeg.org/)
 [![Edge-TTS](https://img.shields.io/badge/TTS-Edge--TTS-green.svg)](https://github.com/rany2/edge-tts)
 
@@ -324,8 +324,8 @@ This project was developed with the assistance of **Claude** (Anthropic's AI ass
 
 ### Technologies
 - **Python** - Core language
-- **FFmpeg** - Video processing
-- **Edge-TTS** - Text-to-speech
+- **[FFmpeg](https://github.com/FFmpeg/FFmpeg)** - Video processing engine
+- **[Edge-TTS](https://github.com/rany2/edge-tts)** - Text-to-speech library by rany2
 - **Rich** - Terminal UI
 - **Pydantic** - Data validation
 - **Loguru** - Logging
