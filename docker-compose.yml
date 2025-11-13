@@ -1,8 +1,6 @@
 # TermiVoxed - Docker Compose Configuration
 # Author: Santhosh T
 
-version: "3.8"
-
 services:
   termivoxed:
     build:
