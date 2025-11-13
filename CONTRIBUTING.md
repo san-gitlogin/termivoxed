@@ -63,33 +63,33 @@ Unsure where to begin? Look for issues labeled:
 
 ### 1. Fork and Clone
 
-\`\`\`bash
+```bash
 # Fork the repository on GitHub, then:
 git clone https://github.com/YOUR_USERNAME/termivoxed.git
 cd termivoxed
-\`\`\`
+```
 
 ### 2. Create Virtual Environment
 
-\`\`\`bash
+```bash
 python3 -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-\`\`\`
+```
 
 ### 3. Install Development Dependencies
 
-\`\`\`bash
+```bash
 pip install --upgrade pip
 pip install -r requirements-dev.txt
-\`\`\`
+```
 
 ### 4. Create a Branch
 
-\`\`\`bash
+```bash
 git checkout -b feature/your-feature-name
 # or
 git checkout -b fix/your-bug-fix
-\`\`\`
+```
 
 ### 5. Make Your Changes
 
@@ -97,7 +97,7 @@ Edit the code, add tests, update documentation as needed.
 
 ### 6. Test Your Changes
 
-\`\`\`bash
+```bash
 # Run the application
 python main.py
 
@@ -107,7 +107,7 @@ pytest
 # Check code style
 black --check .
 flake8 .
-\`\`\`
+```
 
 ---
 
@@ -127,7 +127,7 @@ We follow **PEP 8** with these specifics:
 
 Before committing, format your code:
 
-\`\`\`bash
+```bash
 # Format with Black
 black .
 
@@ -137,7 +137,7 @@ isort .
 # Check for issues
 flake8 .
 mypy . --ignore-missing-imports
-\`\`\`
+```
 
 ### File Organization
 
@@ -152,13 +152,13 @@ mypy . --ignore-missing-imports
 
 ### Format
 
-\`\`\`
+```
 <type>: <subject>
 
 <body>
 
 <footer>
-\`\`\`
+```
 
 ### Type
 
@@ -173,23 +173,23 @@ mypy . --ignore-missing-imports
 
 ### Examples
 
-\`\`\`bash
+```bash
 Add: Interactive voice preview in voice selector
 
 Implemented audio playback preview using pygame mixer.
 Users can now listen to voice samples before selection.
 
 Closes #42
-\`\`\`
+```
 
-\`\`\`bash
+```bash
 Fix: Subtitle rendering with disabled borders
 
 When borders were disabled, text became invisible on light backgrounds.
 Now uses opaque box background (borderstyle=3) for visibility.
 
 Fixes #67
-\`\`\`
+```
 
 ---
 
@@ -214,9 +214,9 @@ Fixes #67
 
 ### PR Title Format
 
-\`\`\`
+```
 <type>: <clear description>
-\`\`\`
+```
 
 Examples:
 - `Add: Batch export functionality`
