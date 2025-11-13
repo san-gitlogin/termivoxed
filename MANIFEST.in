@@ -1,0 +1,62 @@
+# Include important documentation files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include QUICK_START.md
+include PROJECT_SUMMARY.md
+include requirements.txt
+include .env.example
+
+# Include reference documentation
+recursive-include reference *.md
+
+# Include setup scripts
+include setup.sh
+include setup.bat
+include setup.ps1
+include check_dependencies.py
+
+# Include package data
+recursive-include backend *.py
+recursive-include core *.py
+recursive-include models *.py
+recursive-include utils *.py
+recursive-include ui *.py
+
+# Include storage directory structure
+graft storage
+prune storage/cache
+prune storage/temp
+prune storage/output
+prune storage/fonts
+prune storage/projects
+
+# Include storage .gitkeep files to preserve structure
+include storage/cache/.gitkeep
+include storage/temp/.gitkeep
+include storage/output/.gitkeep
+include storage/fonts/.gitkeep
+include storage/projects/.gitkeep
+
+# Exclude unnecessary files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.log
+global-exclude *.tmp
+global-exclude *.mp4
+global-exclude *.mp3
+global-exclude *.avi
+global-exclude *.mov
+
+# Exclude test files and development files
+prune tests
+prune docs
+exclude .gitignore
+exclude .gitattributes
+exclude .editorconfig
+exclude tox.ini
+exclude .coverage

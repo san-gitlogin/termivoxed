@@ -1,0 +1,22 @@
+# Development Dependencies
+# Author: Santhosh T
+# Note: No version numbers specified - always uses latest versions
+
+# Include all production dependencies
+-r requirements.txt
+
+# Testing Framework
+pytest
+pytest-asyncio
+pytest-cov
+
+# Code Quality
+black
+flake8
+mypy
+isort
+pylint
+
+# Documentation
+sphinx
+sphinx-rtd-theme

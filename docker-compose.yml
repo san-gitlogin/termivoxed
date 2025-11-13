@@ -1,0 +1,74 @@
+# TermiVoxed - Docker Compose Configuration
+# Author: Santhosh T
+
+version: "3.8"
+
+services:
+  termivoxed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: termivoxed:latest
+    container_name: termivoxed
+
+    # Interactive terminal mode
+    stdin_open: true
+    tty: true
+
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - STORAGE_DIR=/app/storage
+      - PROJECTS_DIR=/app/storage/projects
+      - TEMP_DIR=/app/storage/temp
+      - CACHE_DIR=/app/storage/cache
+      - OUTPUT_DIR=/app/storage/output
+      - FONTS_DIR=/app/storage/fonts
+
+    # Persistent volumes
+    volumes:
+      # Persist storage data
+      - ./storage:/app/storage
+      # Persist logs
+      - ./logs:/app/logs
+      # Mount your videos (optional - adjust path as needed)
+      - ./videos:/app/videos:ro
+
+    # Network mode
+    network_mode: bridge
+
+    # Resource limits (optional - adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "2"
+          memory: 2G
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Working directory
+    working_dir: /app
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+# Named volumes (optional - for better data persistence)
+volumes:
+  storage_data:
+    driver: local
+  logs_data:
+    driver: local
+
+# Networks (optional)
+networks:
+  default:
+    driver: bridge

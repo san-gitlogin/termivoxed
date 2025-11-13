@@ -1,0 +1,28 @@
+# Console Video Editor - Dependencies
+# Author: Santhosh T
+# Note: No version numbers specified - always uses latest versions
+
+# TUI Framework - Interactive console interface
+textual
+rich
+
+# Async HTTP Framework
+aiohttp
+
+# Text-to-Speech and Audio Processing
+edge-tts
+mutagen
+pygame
+
+# Data Validation and Configuration
+pydantic
+pydantic-settings
+python-dotenv
+
+# Network Retry Logic
+tenacity
+
+# Utilities
+loguru
+requests
+inquirer

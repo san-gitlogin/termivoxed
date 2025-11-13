@@ -1,0 +1,91 @@
+# Console Video Editor - Docker Ignore File
+# Author: Santhosh T
+#
+# This file excludes unnecessary files from Docker builds
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Storage directories (will be mounted as volumes)
+storage/cache/*
+storage/temp/*
+storage/output/*
+storage/fonts/*
+storage/projects/*
+
+# Keep structure with .gitkeep
+!storage/**/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# Media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.mp3
+*.wav
+
+# Documentation (include only essential docs)
+*.md
+!README.md
+
+# Test files
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.coverage
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker files (no need to include in image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Development files
+requirements-dev.txt
+setup.sh
+setup.bat
+setup.ps1
+run.sh
+run.bat
+run.ps1
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
