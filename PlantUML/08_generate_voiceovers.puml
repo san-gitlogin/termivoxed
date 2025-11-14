@@ -1,0 +1,158 @@
+@startuml 08_Generate_VoiceOvers_Batch
+title Flow 8: Generate Voice-Overs (Batch Processing)
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "backend/tts_service.py\n::TTSService" as TTS
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/segment.py\n::Segment" as Segment
+participant "utils/logger.py\n::suppress_console_logs" as Logger
+participant "edge-tts" as EdgeTTS
+database "File System" as FileSystem
+
+== Generate Voice-Overs (Batch) ==
+
+Main -> User: Display: [bold green]Generate Voice-Overs[/bold green]
+
+alt No segments exist
+    Main -> User: [yellow]No segments to process[/yellow]
+    Main -> Main: Return to project menu
+else Segments exist
+    ' Count segments needing audio
+    Main -> Main: Count segments needing audio:\nsegments_to_generate = [\n  seg for seg in timeline.segments\n  if not seg.audio_path or\n     not Path(seg.audio_path).exists()\n]
+
+    Main -> Main: count = len(segments_to_generate)
+
+    alt All segments have audio
+        Main -> User: [green]All segments already have audio generated[/green]
+        Main -> Main: Return to project menu
+    else Need to generate
+        Main -> User: Display: Segments needing audio: {count}
+
+        Main -> User: Confirm: "Generate voice-overs?"
+        User --> Main: confirm = True
+
+        alt User confirms
+            ' Suppress console logs for clean progress bar
+            Main -> Logger: suppress_console_logs()
+            activate Logger
+
+            Main -> User: Initialize progress bar:\n[=====>              ] Generating audio... 0%
+
+            loop For each segment in segments_to_generate (i = 0 to count-1)
+                Main -> User: Update progress bar:\n[=====>              ] Generating: {segment.name}\n                       {i+1}/{count} (33%)
+
+                Main -> TTS: generate_audio(\n  text=segment.text,\n  language=segment.language,\n  voice=segment.voice_id,\n  project_name=project.name,\n  segment_name=segment.name,\n  rate=segment.rate,\n  volume=segment.volume,\n  pitch=segment.pitch\n)
+                activate TTS
+
+                ' Cache check
+                TTS -> TTS: cache_key = MD5(\n  text + voice + rate + volume + pitch\n)
+                TTS -> TTS: find_cached_files(cache_key)
+
+                alt Cache hit
+                    TTS -> TTS: Log: Using cached audio
+                    TTS --> Main: (cached_audio_path, cached_subtitle_path)
+                else Cache miss
+                    ' Generate new audio
+                    TTS -> FileSystem: Create paths:\nstorage/projects/{name}/{lang}/{segment}.mp3\nstorage/projects/{name}/{lang}/{segment}.srt
+
+                    TTS -> EdgeTTS: communicate = Communicate(\n  text, voice, rate, volume, pitch\n)
+                    activate EdgeTTS
+                    TTS -> EdgeTTS: submaker = SubMaker()
+
+                    loop Stream chunks
+                        EdgeTTS --> TTS: chunk
+                        alt chunk["type"] = "audio"
+                            TTS -> TTS: audio_data.extend(chunk["data"])
+                        else chunk["type"] = "WordBoundary"
+                            TTS -> EdgeTTS: submaker.feed(chunk)
+                        end
+                    end
+                    deactivate EdgeTTS
+
+                    TTS -> FileSystem: Write audio file
+                    TTS -> TTS: subtitle_content = submaker.get_srt()
+
+                    alt subtitle_content empty
+                        TTS -> TTS: Generate accurate subtitles\nfrom audio duration
+                    end
+
+                    TTS -> FileSystem: Write subtitle file
+                    TTS -> TTS: store_cache_mapping(cache_key, paths)
+                    TTS --> Main: (audio_path, subtitle_path)
+                end
+                deactivate TTS
+
+                Main -> Segment: segment.audio_path = audio_path\nsegment.subtitle_path = subtitle_path
+
+                Main -> User: Update progress bar:\n[==========>         ] Generating audio... {percent}%
+            end
+
+            Main -> Logger: Restore console logs
+            deactivate Logger
+
+            Main -> User: [green]✓ Voice-over generation complete[/green]
+
+        else User cancels
+            Main -> Main: Return to project menu
+        end
+    end
+end
+
+Main -> Main: Return to project menu
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Batch Processing:**
+  - Processes only segments missing audio files
+  - Skips segments with existing audio_path
+  - Uses Rich Progress bar for visual feedback
+
+  **Progress Bar:**
+  - SpinnerColumn: Animated spinner
+  - TextColumn: Current task description
+  - BarColumn: Visual progress bar
+  - TextColumn: Percentage complete
+  - Updates: After each segment processed
+
+  **Console Log Suppression:**
+  - suppress_console_logs() context manager
+  - Removes console handler temporarily
+  - File logging continues (logs/termivoxed.log)
+  - Restores console handler after completion
+  - Provides clean progress bar display
+
+  **Error Handling:**
+  - Individual segment failures logged
+  - Processing continues for remaining segments
+  - Failed segments remain without audio_path
+  - User notified of failures
+
+  **Performance:**
+  - Sequential processing (not parallel)
+  - TTS cache reduces redundant API calls
+  - Network retries with exponential backoff
+  - 30-second timeout per audio generation
+
+  **After Generation:**
+  - Project NOT auto-saved (memory only)
+  - User can review before saving
+  - Generated files persist on disk
+  - Cache updated for future use
+
+  **File Paths:**
+  - Audio: storage/projects/{name}/{lang}/{segment}.mp3
+  - Subtitle: storage/projects/{name}/{lang}/{segment}.srt
+  - Cache: storage/cache/tts_cache.json
+
+  **Use Cases:**
+  - Generate all missing audio after adding segments
+  - Regenerate after voice changes
+  - Process batch imports
+  - Initial project setup
+end note
+
+@enduml

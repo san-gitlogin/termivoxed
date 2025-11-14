@@ -1,0 +1,272 @@
+@startuml 05_Add_Segment
+title Flow 5: Add Segment (Complete with Voice Selection & TTS)
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/segment.py\n::Segment" as Segment
+participant "backend/tts_service.py\n::TTSService" as TTS
+participant "utils/voice_selector.py\n::VoiceSelector" as VoiceSelector
+participant "utils/google_fonts.py" as GoogleFonts
+participant "utils/font_manager.py\n::FontManager" as FontMgr
+participant "backend/subtitle_utils.py\n::SubtitleUtils" as Subtitle
+participant "edge-tts" as EdgeTTS
+participant "FFprobe Binary" as FFprobeBin
+database "File System" as FileSystem
+
+== Add Segment ==
+
+' Basic input
+Main -> User: Prompt: "Segment name"
+User --> Main: name = "Intro"
+
+' Timing with validation loop
+loop Timing Input & Validation
+    Main -> User: Prompt: "Start time (seconds)"
+    User --> Main: start_time = 0.0
+
+    Main -> User: Prompt: "End time (seconds)"
+    User --> Main: end_time = 10.0
+
+    Main -> Main: _validate_segment_timing(start_time, end_time)
+    Main -> Main: Check: start_time >= 0?\nCheck: end_time > start_time?\nCheck: end_time <= video_duration?
+
+    Main -> Timeline: Check for overlaps
+    loop For each existing segment
+        Timeline -> Timeline: If !(new_end <= seg.start OR new_start >= seg.end):\n  Add to overlapping_segments
+    end
+
+    alt Overlaps found
+        Main -> User: Display error:\n[red]✗ Segment overlaps with {count} segment(s)[/red]\n\nOverlapping segments:\n• Segment1: 5s - 15s\n• Segment2: 8s - 12s
+        Main -> User: Display options:\n1. Re-enter segment times\n2. Remove overlapping segment(s)\n3. Edit overlapping segment(s)\n4. Cancel
+        User --> Main: option
+
+        alt Option 2: Remove overlapping
+            loop For each overlapping segment
+                Main -> Timeline: remove_segment(segment.id)
+                Main -> User: [green]✓ Removed: {segment.name}[/green]
+            end
+            Main -> Main: Break validation loop
+        else Option 1 or 3
+            Main -> Main: Continue loop (retry or edit)
+        end
+    else No overlaps
+        Main -> Main: Break validation loop
+    end
+end
+
+Main -> User: Prompt: "Text for voice-over"
+User --> Main: text = "Welcome to my video"
+
+' Language selection
+Main -> User: Interactive list (inquirer):\nSelect language (↑↓ to navigate):\n• English (en)\n• Hindi (hi)\n• Tamil (ta)\n• French (fr)\n... (16 languages total)
+User --> Main: language = "en"
+
+' Voice selection with preview
+Main -> VoiceSelector: select_voice_interactive(tts_service, "en")
+activate VoiceSelector
+
+VoiceSelector -> TTS: get_available_voices("en")
+activate TTS
+TTS -> EdgeTTS: Try: VoicesManager.create() or list_voices()
+EdgeTTS --> TTS: voices list
+TTS -> TTS: Filter by language, extract:\nname, short_name, gender, locale
+TTS --> VoiceSelector: voices = [{name, short_name, gender, locale}, ...]
+deactivate TTS
+
+VoiceSelector -> User: Display voice table:\n╔════╦═════════════════════════╦════════╦════════╗\n║ #  ║ Voice Name              ║ Gender ║ Locale ║\n╠════╬═════════════════════════╬════════╬════════╣\n║ 1  ║ Ava Multilingual        ║ Female ║ en-US  ║\n║ 2  ║ Andrew Multilingual     ║ Male   ║ en-US  ║\n╚════╩═════════════════════════╩════════╩════════╝
+
+loop Voice Selection
+    VoiceSelector -> User: Select voice (↑↓ to navigate)
+    User --> VoiceSelector: voice_0 (Ava)
+
+    loop Action Menu
+        VoiceSelector -> User: Voice: Ava Multilingual\n• 🎧 Preview this voice\n• ✓ Select this voice\n• ← Back to list
+        User --> VoiceSelector: action
+
+        alt Action: Preview
+            VoiceSelector -> VoiceSelector: preview_text = "Hello! This is a voice preview..."
+            VoiceSelector -> VoiceSelector: Check cache:\n/tmp/voice_previews/en-US-AvaMultilingualNeural.mp3
+
+            alt Cache miss
+                VoiceSelector -> EdgeTTS: Communicate(\n  text=preview_text,\n  voice="en-US-AvaMultilingualNeural"\n)
+                EdgeTTS --> VoiceSelector: Audio data
+                VoiceSelector -> FileSystem: Save to cache
+            end
+
+            VoiceSelector -> VoiceSelector: pygame.mixer.music.play()
+            VoiceSelector -> User: ▶ Playing preview...\n✓ Preview complete
+        else Action: Select
+            VoiceSelector -> User: [green]✓ Selected: Ava Multilingual[/green]
+            VoiceSelector --> Main: voice = "en-US-AvaMultilingualNeural"
+        end
+    end
+end
+deactivate VoiceSelector
+
+' Voice parameters
+Main -> User: Prompt: "Rate (e.g., +10%, -10%)" [default: +0%]
+User --> Main: rate = "+0%"
+
+Main -> User: Prompt: "Volume (e.g., +10%, -10%)" [default: +0%]
+User --> Main: volume = "+0%"
+
+Main -> User: Prompt: "Pitch (e.g., +5Hz, -5Hz)" [default: +0Hz]
+User --> Main: pitch = "+0Hz"
+
+' Subtitle styling
+Main -> User: Confirm: "Configure subtitle styling?"
+User --> Main: configure = True
+
+alt Custom styling
+    Main -> User: Confirm: "Use custom font?"
+    User --> Main: use_custom = True
+    Main -> User: Prompt: "Enter Google Font URL or name"
+    User --> Main: font_input = "Momo Signature"
+
+    Main -> GoogleFonts: get_font_from_input_with_install(font_input)
+    activate GoogleFonts
+    GoogleFonts -> FontMgr: ensure_font_available("Momo Signature")
+    activate FontMgr
+
+    alt Font not installed
+        FontMgr -> FontMgr: download_google_font("Momo Signature")
+        FontMgr -> FontMgr: GET https://fonts.googleapis.com/css2?family=Momo+Signature
+        FontMgr -> FontMgr: Parse CSS, extract font URLs
+        FontMgr -> FileSystem: Download .ttf files to\nstorage/fonts/Momo_Signature/
+        FontMgr -> FontMgr: Copy to system font directory:\nmacOS: ~/Library/Fonts/\nLinux: ~/.local/share/fonts/\nWindows: %LOCALAPPDATA%/.../Fonts/
+        FontMgr -> FontMgr: Update font cache (fc-cache on Linux)
+    end
+
+    FontMgr --> GoogleFonts: font_name
+    deactivate FontMgr
+    GoogleFonts --> Main: "Momo Signature"
+    deactivate GoogleFonts
+
+    Main -> User: Additional styling prompts:\n- Font size: 24\n- Color: White\n- Position: 30px from bottom\n- Border enabled: Yes\n- Border style: Outline with shadow\n- Outline width: 2.0px\n- Outline color: Black\n- Shadow: 1.0px
+    User --> Main: styling dict
+else Default styling
+    Main -> Subtitle: get_language_specific_font("en")
+    Subtitle --> Main: "Roboto"
+    Main -> Main: styling = default values
+end
+
+' Create segment
+Main -> Timeline: add_segment(\n  start=0.0, end=10.0,\n  text="Welcome...",\n  voice="en-US-AvaMultilingualNeural",\n  language="en", name="Intro"\n)
+activate Timeline
+Timeline -> Segment: Create Segment(\n  id=uuid4(),\n  name="Intro",\n  start_time=0.0, end_time=10.0,\n  text="Welcome to my video",\n  voice_id="en-US-AvaMultilingualNeural",\n  language="en"\n)
+Timeline -> Segment: validate()
+Timeline -> Timeline: Check: end <= video_duration?\nAppend to segments list\nSort by start_time
+Timeline --> Main: Segment instance
+deactivate Timeline
+
+' Set additional properties
+Main -> Segment: Set:\nrate, volume, pitch,\nsubtitle_font, subtitle_size,\nsubtitle_color, subtitle_position,\nsubtitle_border_enabled,\nsubtitle_border_style,\nsubtitle_outline_width,\nsubtitle_outline_color,\nsubtitle_shadow
+
+Main -> Main: project.save()
+Main -> User: [green]✓ Segment added: Intro[/green]\nTime: 0.00s - 10.00s (Duration: 10.00s)\nVoice: en-US-AvaMultilingualNeural\nSubtitle font: Momo Signature
+
+' Optional: Generate audio now
+Main -> User: Confirm: "Generate voice-over audio now?"
+User --> Main: yes
+
+Main -> TTS: generate_audio(\n  text="Welcome to my video",\n  language="en",\n  voice="en-US-AvaMultilingualNeural",\n  project_name="MyProject",\n  segment_name="Intro",\n  rate="+0%", volume="+0%", pitch="+0Hz"\n)
+activate TTS
+
+' Cache key
+TTS -> TTS: cache_key = MD5(\n  "Welcome to my video_en-US-AvaMultilingualNeural_+0%_+0%_+0Hz"\n) = "a1b2c3d4..."
+
+TTS -> TTS: find_cached_files(cache_key)
+alt Cache miss
+    TTS -> FileSystem: Create paths:\naudio = storage/projects/MyProject/en/Intro.mp3\nsubtitle = storage/projects/MyProject/en/Intro.srt
+
+    TTS -> EdgeTTS: communicate = Communicate(\n  text="Welcome to my video",\n  voice="en-US-AvaMultilingualNeural",\n  rate="+0%", volume="+0%", pitch="+0Hz"\n)
+    TTS -> EdgeTTS: submaker = SubMaker()
+
+    loop Stream chunks (30s timeout)
+        TTS -> EdgeTTS: async for chunk in communicate.stream()
+        alt chunk["type"] = "audio"
+            TTS -> TTS: audio_data.extend(chunk["data"])
+        else chunk["type"] = "WordBoundary"
+            TTS -> EdgeTTS: submaker.feed(chunk)
+        end
+    end
+
+    TTS -> FileSystem: Write audio: Intro.mp3
+    TTS -> EdgeTTS: subtitle_content = submaker.get_srt()
+
+    alt subtitle_content empty
+        TTS -> FFprobeBin: Get audio duration
+        FFprobeBin --> TTS: 8.5s
+        TTS -> TTS: Generate accurate subtitles:\nSplit text into chunks (~45 chars)\nDistribute timing evenly:\n1\n00:00:00,000 --> 00:00:08,500\nWelcome to my video
+    end
+
+    TTS -> FileSystem: Write subtitle: Intro.srt
+    TTS -> TTS: store_cache_mapping(cache_key, audio_path, subtitle_path)
+end
+
+TTS --> Main: (audio_path, subtitle_path)
+deactivate TTS
+
+Main -> Segment: Set audio_path, subtitle_path
+
+' Validate audio duration
+Main -> FFprobeBin: Get audio duration
+FFprobeBin --> Main: 8.2s
+Main -> Main: segment_duration = 10.0s
+
+alt audio_duration < segment_duration
+    Main -> User: Audio fits within segment (no action needed)
+else audio_duration > segment_duration
+    Main -> User: ⚠ Audio (8.2s) exceeds segment (10.0s)
+    alt No following segments
+        Main -> User: Confirm: Extend segment to 8.2s?
+        alt User confirms
+            Main -> Segment: segment.end_time = start + 8.2
+            Main -> Main: project.save()
+        end
+    else Following segments exist
+        Main -> User: Options:\n1. Keep current (audio cut)\n2. Extend and adjust following\n3. Adjust voice rate\n4. Edit manually
+    end
+end
+
+Main -> Main: project.save()
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Validation:**
+  - Timing: start >= 0, end > start, end <= video_duration
+  - Overlaps: Checks all existing segments for conflicts
+  - Text: Cannot be empty, sanitized for special chars
+
+  **Voice Selection:**
+  - 200+ voices via edge-tts API
+  - Preview generation with caching
+  - Pygame mixer for playback
+
+  **Font Management:**
+  - Google Fonts API: CSS parsing for font URLs
+  - System installation: Platform-specific directories
+  - Cache: storage/fonts/{font_name}/
+
+  **TTS Generation:**
+  - Cache key: MD5(text + voice + rate + volume + pitch)
+  - Streaming: edge-tts Communicate with SubMaker
+  - Subtitle: Word-level timing from WordBoundary events
+  - Fallback: Accurate subtitle generation from audio duration
+
+  **Audio Validation:**
+  - Compare audio_duration vs segment_duration
+  - Auto-extend if no following segments
+  - Rate adjustment suggestions if too long
+
+  **File Paths:**
+  - Audio: storage/projects/{name}/{lang}/{segment}.mp3
+  - Subtitle: storage/projects/{name}/{lang}/{segment}.srt
+  - Preview: /tmp/voice_previews/{voice}.mp3
+end note
+
+@enduml

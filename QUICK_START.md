@@ -1,12 +1,11 @@
-
-
 # Quick Start Guide 🚀
 
-Get started with Console Video Editor in 5 minutes!
+Get started with TermiVoxed in 5 minutes!
 
 ## Step 1: Install Dependencies
 
 ### macOS
+
 ```bash
 # Install FFmpeg
 brew install ffmpeg
@@ -17,6 +16,7 @@ cd console_video_editor
 ```
 
 ### Linux (Ubuntu/Debian)
+
 ```bash
 # Install FFmpeg
 sudo apt-get update
@@ -29,6 +29,7 @@ chmod +x setup.sh
 ```
 
 ### Manual Setup
+
 ```bash
 # Create virtual environment
 python3 -m venv venv
@@ -57,12 +58,14 @@ python main.py
 1. **Select "Create New Project" (option 1)**
 
 2. **Enter project details:**
+
    ```
    Project name: MyFirstProject
    Video file path: /path/to/your/video.mp4
    ```
 
 3. **Add a segment (option 1):**
+
    ```
    Segment name: Intro
    Start time (seconds): 0
@@ -178,6 +181,7 @@ Language: ta
 ## Voice Parameters Guide
 
 ### Rate (Speed)
+
 - `+50%` - Much faster (excited, energetic)
 - `+20%` - Faster (quick explanation)
 - `+0%` - Normal (default)
@@ -185,11 +189,13 @@ Language: ta
 - `-50%` - Much slower (emphasis)
 
 ### Volume
+
 - `+20%` - Louder
 - `+0%` - Normal (default)
 - `-20%` - Quieter
 
 ### Pitch
+
 - `+10Hz` - Higher pitch (younger voice)
 - `+0Hz` - Normal (default)
 - `-10Hz` - Lower pitch (deeper voice)
@@ -197,10 +203,12 @@ Language: ta
 ## Troubleshooting
 
 ### "Video file not found"
+
 - Use absolute path: `/Users/username/Videos/video.mp4`
 - Or relative from project directory: `../videos/video.mp4`
 
 ### "FFmpeg not found"
+
 ```bash
 # Verify FFmpeg installation
 ffmpeg -version
@@ -211,11 +219,13 @@ ffmpeg -version
 ```
 
 ### "Edge-TTS connection error"
+
 - Check internet connection
 - TTS service requires internet access
 - Wait a moment and try again (automatic retry)
 
 ### "Export failed"
+
 - Check disk space
 - Verify all segments have audio generated
 - Try lower quality preset ("Balanced" instead of "Lossless")

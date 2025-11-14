@@ -1,0 +1,120 @@
+@startuml 10_Project_Settings
+title Flow 10: Project Settings
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+database "File System" as FileSystem
+
+== Project Settings ==
+
+Main -> User: Display: [bold green]Project Settings[/bold green]
+
+Main -> User: Display current settings:\nExport Quality: {project.export_quality}\nInclude Subtitles: {project.include_subtitles}\nBackground Music: {project.background_music_path or "None"}
+
+Main -> User: Confirm: "Edit settings?"
+User --> Main: edit = True
+
+alt User wants to edit
+    ' Export quality
+    Main -> User: Prompt: "Export quality"\nChoices: [lossless, high, balanced]\nDefault: {project.export_quality}
+    User --> Main: quality = "high"
+    Main -> Project: project.export_quality = "high"
+
+    ' Include subtitles
+    Main -> User: Confirm: "Include subtitles"\nDefault: {project.include_subtitles}
+    User --> Main: include_subtitles = False
+    Main -> Project: project.include_subtitles = False
+
+    ' Background music
+    Main -> User: Confirm: "Set background music?"
+    User --> Main: set_music = True
+
+    alt User wants to set music
+        Main -> User: Prompt: "Background music file path"
+        User --> Main: music_path = "/path/to/music.mp3"
+
+        Main -> FileSystem: Check if file exists:\nPath(music_path).exists()
+        activate FileSystem
+        alt File exists
+            FileSystem --> Main: True
+            Main -> Project: project.background_music_path = music_path
+        else File not found
+            FileSystem --> Main: False
+            Main -> User: [yellow]File not found[/yellow]
+            Main -> Main: Keep current setting
+        end
+        deactivate FileSystem
+    end
+
+    Main -> User: [green]✓ Settings updated[/green]
+
+else User doesn't want to edit
+    Main -> Main: No changes made
+end
+
+Main -> Main: Return to project menu
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Project Settings:**
+  - export_quality: "lossless", "high", or "balanced"
+  - include_subtitles: Boolean (True/False)
+  - background_music_path: String path or None
+
+  **Quality Presets:**
+  - lossless: CRF 0 (best quality, largest file)
+  - high: CRF 18 (near-lossless, large file)
+  - balanced: CRF 23 (good quality, reasonable size)
+
+  **CRF (Constant Rate Factor):**
+  - Lower = better quality, larger file
+  - Range: 0-51 (H.264)
+  - 0 = lossless
+  - 18 = visually lossless
+  - 23 = default (good balance)
+
+  **Subtitle Toggle:**
+  - True: Burn subtitles into video (hard subs)
+  - False: No subtitles in exported video
+  - Does not affect segment subtitle data
+  - Can be toggled without regenerating audio
+
+  **Background Music:**
+  - Validates file existence before setting
+  - Supported formats: MP3, WAV, AAC, etc.
+  - Music looped if shorter than video
+  - Fade out applied at end
+  - Volume: -16dB reduction (configurable)
+
+  **Settings Persistence:**
+  - NOT auto-saved after editing
+  - User must explicitly save project (Option 8)
+  - Stored in project.json:
+    {
+      "export_quality": "high",
+      "include_subtitles": false,
+      "background_music_path": "/path/to/music.mp3"
+    }
+
+  **Use Cases:**
+  - Change quality for different output sizes
+  - Toggle subtitles for accessibility
+  - Add/remove background music
+  - Prepare for different export scenarios
+
+  **Default Values:**
+  - export_quality: "balanced"
+  - include_subtitles: True
+  - background_music_path: None
+
+  **Validation:**
+  - Quality: Must be valid preset name
+  - Music path: Checks file existence
+  - Subtitles: Boolean validation
+end note
+
+@enduml

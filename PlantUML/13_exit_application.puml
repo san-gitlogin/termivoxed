@@ -1,0 +1,139 @@
+@startuml 13_Exit_Application
+title Flow 13: Exit Application
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "main.py\n::async_main()" as AsyncMain
+participant "models/project.py\n::Project" as Project
+
+== Exit Application ==
+
+Main -> User: User selects: "4. Exit"
+
+Main -> User: Display:\n[cyan]Thank you for using TermiVoxed![/cyan]
+
+Main -> Main: Break main loop:\nbreak  # Exit while True loop
+
+Main -> Main: Return from run()
+
+Main --> AsyncMain: run() completes
+
+AsyncMain -> AsyncMain: Exit async_main()
+
+AsyncMain --> AsyncMain: Return to main()
+
+AsyncMain -> AsyncMain: Normal exit
+
+AsyncMain -> User: Application terminates
+
+note over User, Main
+  **Technical Details:**
+
+  **Exit Flow:**
+  1. User selects option "4" from main menu
+  2. Display thank you message
+  3. Break main event loop (while True)
+  4. Exit run() method
+  5. Exit async_main() coroutine
+  6. Return to main() entry point
+  7. Program terminates normally
+
+  **Main Loop Structure:**
+  async def async_main():
+      editor = ConsoleEditor()
+      await editor.run()
+
+  async def run(self):
+      self.show_banner()
+      while True:  # Main event loop
+          try:
+              choice = self.show_main_menu()
+              if choice == "4":
+                  # Display goodbye message
+                  break  # Exit loop
+              # Handle other choices...
+          except KeyboardInterrupt:
+              # Handle Ctrl+C
+              if Confirm.ask("Exit application?"):
+                  break
+
+  **Alternative Exit Methods:**
+  1. Ctrl+C (KeyboardInterrupt):
+     - Caught in main loop
+     - Asks confirmation: "Exit application?"
+     - If yes: break loop
+     - If no: continue loop
+
+  2. Keyboard Interrupt from project menu:
+     - Returns to main menu
+     - Can then exit normally
+
+  3. Exception/Error:
+     - Logged to file
+     - Displayed to user
+     - Application may exit with error code
+
+  **Cleanup on Exit:**
+  - NO explicit cleanup performed
+  - Project auto-saved during operations
+  - Temp files persist (user can clean manually)
+  - Logs flushed automatically
+  - No resources requiring explicit cleanup
+
+  **No Auto-Save on Exit:**
+  - Project NOT automatically saved on exit
+  - User must save manually (Option 8)
+  - Prevents accidental overwrites
+  - User controls when to save
+
+  **Unsaved Changes:**
+  - No warning about unsaved changes
+  - User responsible for saving before exit
+  - Recommendation: Save frequently (Option 8)
+
+  **Exit Codes:**
+  - Normal exit: 0 (success)
+  - KeyboardInterrupt: 0 (graceful)
+  - Exception: 1 (error)
+  - Fatal error: 1 (error)
+
+  **Entry Point:**
+  def main():
+      try:
+          asyncio.run(async_main())
+      except KeyboardInterrupt:
+          console.print("\\n[yellow]Goodbye![/yellow]")
+      except Exception as e:
+          console.print(f"\\n[red]Fatal error: {e}[/red]")
+          sys.exit(1)
+
+  **Console Scripts:**
+  - termivoxed: Calls main()
+  - tvx: Calls main() (alias)
+  - Both defined in setup.py entry_points
+
+  **Graceful Shutdown:**
+  - All resources released automatically
+  - Python garbage collection
+  - File handles closed
+  - Network connections closed
+  - Logger handlers flushed
+
+  **Post-Exit State:**
+  - Project files: Persist in storage/projects/
+  - Audio files: Persist in storage/projects/{name}/{lang}/
+  - Cache: Persist in storage/cache/
+  - Temp files: Persist in storage/temp/ (manual cleanup)
+  - Logs: Persist in logs/termivoxed.log
+  - Fonts: Persist in system font directories
+
+  **Best Practices:**
+  1. Save project before exit (Option 8)
+  2. Verify export completed successfully
+  3. Note any errors in logs
+  4. Clean temp files periodically
+end note
+
+@enduml

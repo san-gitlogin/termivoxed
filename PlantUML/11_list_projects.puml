@@ -1,0 +1,137 @@
+@startuml 11_List_All_Projects
+title Flow 11: List All Projects
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+database "File System" as FileSystem
+
+== List All Projects ==
+
+Main -> User: Display: [bold green]All Projects[/bold green]
+
+Main -> Project: list_projects() [classmethod]
+activate Project
+
+Project -> FileSystem: Iterate over:\nstorage/projects/*/
+activate FileSystem
+
+loop For each directory in storage/projects/
+    FileSystem --> Project: directory_path
+
+    Project -> FileSystem: Check if project.json exists:\nPath(directory / "project.json").exists()
+
+    alt project.json exists
+        FileSystem -> FileSystem: Read file:\nstorage/projects/{name}/project.json
+        FileSystem --> Project: JSON content
+
+        Project -> Project: Try parse JSON:\ndata = json.load(f)
+
+        alt JSON parse successful
+            Project -> Project: Extract metadata:\nname = data["name"]\nvideo_path = data["video_path"]\ncreated_at = data["created_at"]\nmodified_at = data["modified_at"]\nsegments_count = len(\n  data["timeline"]["segments"]\n)
+
+            Project -> Project: Append to projects list:\nprojects.append({\n  "name": name,\n  "video_path": video_path,\n  "created_at": created_at,\n  "modified_at": modified_at,\n  "segments_count": segments_count\n})
+
+        else JSON parse failed
+            Project -> Project: Log warning:\nCould not read project {dir.name}
+            Project -> Project: Skip this project
+        end
+
+    else project.json doesn't exist
+        Project -> Project: Skip directory (not a project)
+    end
+end
+
+deactivate FileSystem
+
+Project -> Project: Sort projects by modified_at:\nprojects.sort(\n  key=lambda p: p["modified_at"],\n  reverse=True  # Most recent first\n)
+
+Project --> Main: projects = [\n  {name, video_path, created_at,\n   modified_at, segments_count},\n  ...\n]
+deactivate Project
+
+alt No projects found
+    Main -> User: [yellow]No projects found[/yellow]
+else Projects exist
+    Main -> User: Display Rich Table:\n╔═══════════════════════════════════════════════╗\n║              All Projects                     ║\n╠════════╦════════════╦═══════╦══════════╦══════╣\n║ Name   ║ Video      ║ Segs  ║ Created  ║ Mod  ║\n╠════════╬════════════╬═══════╬══════════╬══════╣\n║ Proj1  ║ video1.mp4 ║   5   ║ 11-13    ║11-14 ║\n║ Proj2  ║ video2.mp4 ║   3   ║ 11-12    ║11-13 ║\n║ Proj3  ║ video3.mp4 ║   8   ║ 11-10    ║11-12 ║\n╚════════╩════════════╩═══════╩══════════╩══════╝
+
+    loop For each project in projects
+        Main -> User: Display row:\nName: {proj["name"]}\nVideo: {Path(proj["video_path"]).name}\nSegments: {proj["segments_count"]}\nCreated: {proj["created_at"][:19]}\nModified: {proj["modified_at"][:19]}
+    end
+end
+
+Main -> Main: Return to main menu
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Project Discovery:**
+  - Scans: storage/projects/*/
+  - Validates: Each directory has project.json
+  - Parsing: Handles corrupt/invalid JSON gracefully
+  - Skips: Directories without project.json
+
+  **Metadata Extraction:**
+  - name: Project name
+  - video_path: Original video file path
+  - created_at: ISO 8601 timestamp
+  - modified_at: ISO 8601 timestamp
+  - segments_count: Number of segments in timeline
+
+  **Sorting:**
+  - Primary: modified_at (descending)
+  - Shows most recently modified projects first
+  - Helps users find recent work quickly
+
+  **Display Format:**
+  - Uses Rich Table for formatted output
+  - Columns: Name, Video, Segments, Created, Modified
+  - Timestamps: Truncated to first 19 chars (YYYY-MM-DD HH:MM:SS)
+  - Video path: Shows filename only (not full path)
+
+  **Error Handling:**
+  - Corrupt JSON: Logged and skipped
+  - Missing fields: Would raise KeyError, skip project
+  - Empty projects directory: Shows "No projects found"
+
+  **File System Structure:**
+  storage/projects/
+    ├── Project1/
+    │   └── project.json
+    ├── Project2/
+    │   └── project.json
+    └── Project3/
+        └── project.json
+
+  **Project.json Structure:**
+  {
+    "name": "Project1",
+    "video_path": "/path/to/video.mp4",
+    "created_at": "2025-11-14T08:00:00.123456",
+    "modified_at": "2025-11-14T09:30:00.123456",
+    "timeline": {
+      "segments": [...]  # Length counted for segments_count
+    }
+  }
+
+  **Use Cases:**
+  - Browse available projects
+  - Find recently modified projects
+  - Check project status (segment count)
+  - Identify projects by video name
+
+  **Performance:**
+  - Reads only metadata (not full project)
+  - No video file access (fast)
+  - Lightweight JSON parsing
+  - Sorted in memory (not expensive)
+
+  **Limitations:**
+  - Doesn't show video duration
+  - Doesn't show total coverage
+  - Doesn't validate video file existence
+  - Read-only view (no actions)
+end note
+
+@enduml

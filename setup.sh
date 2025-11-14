@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Console Video Editor - Unix/Linux/macOS Setup Script
+# TermiVoxed - Unix/Linux/macOS Setup Script
 # Author: Santhosh T
 #
-# This script sets up the Console Video Editor on Unix-like systems
+# This script sets up the TermiVoxed on Unix-like systems
 
 echo ""
 echo "========================================"
-echo "Console Video Editor - Setup"
+echo "TermiVoxed - Setup"
 echo "========================================"
 echo ""
 

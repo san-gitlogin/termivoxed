@@ -1,0 +1,75 @@
+@startuml 01_Application_Startup_and_Initialization
+title Flow 1: Application Startup & Initialization
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "main.py\n::show_banner()" as Banner
+participant "config.py\n::Settings" as Config
+participant "backend/tts_service.py\n::TTSService" as TTS
+participant "utils/logger.py\n::logger" as Logger
+database "File System\n::storage/" as FileSystem
+
+== Application Startup & Initialization ==
+
+User -> Main: python main.py
+activate Main
+
+Main -> Config: Load settings from .env
+activate Config
+Config -> Config: Parse environment variables
+Config -> Config: Set default values:\n- STORAGE_DIR=storage\n- FFMPEG_PATH=ffmpeg\n- FFPROBE_PATH=ffprobe\n- DEFAULT_CRF=23\n- TTS_VOLUME_BOOST=3\n- BGM_VOLUME_REDUCTION=16
+Config -> FileSystem: create_directories()\nCreate:\n- storage/\n- storage/projects/\n- storage/temp/\n- storage/cache/\n- storage/output/\n- storage/fonts/
+Config --> Main: Settings instance (singleton)
+deactivate Config
+
+Main -> TTS: Initialize TTSService()
+activate TTS
+TTS -> FileSystem: Load cache from\nstorage/cache/tts_cache.json
+FileSystem --> TTS: cache_mapping dict\n(or empty if not exists)
+TTS -> TTS: Initialize best_voices dict:\n{\n  'en': 'en-US-AvaMultilingualNeural',\n  'fr': 'fr-FR-VivienneMultilingualNeural',\n  'ko': 'ko-KR-HyunsuMultilingualNeural',\n  'hi': 'hi-IN-MadhurNeural',\n  'kn': 'kn-IN-GaganNeural',\n  'ta': 'ta-IN-ValluvarNeural',\n  'te': 'te-IN-ShrutiNeural',\n  'ml': 'ml-IN-SobhanaNeural',\n  'es': 'es-ES-ElviraNeural',\n  'de': 'de-DE-KatjaNeural',\n  'it': 'it-IT-ElsaNeural',\n  'pt': 'pt-BR-FranciscaNeural',\n  'zh': 'zh-CN-XiaoxiaoNeural',\n  'ja': 'ja-JP-NanamiNeural',\n  'ar': 'ar-SA-ZariyahNeural',\n  'ru': 'ru-RU-SvetlanaNeural'\n}
+TTS --> Main: TTSService instance
+deactivate TTS
+
+Main -> Logger: Initialize logging
+activate Logger
+Logger -> Logger: Setup console handler:\n- Output: stderr\n- Format: colored with timestamp\n- Level: INFO
+Logger -> FileSystem: Setup file handler:\n- Path: logs/termivoxed.log\n- Rotation: 10 MB\n- Retention: 7 days\n- Level: DEBUG
+Logger --> Main: Logger configured
+deactivate Logger
+
+Main -> Banner: show_banner()
+activate Banner
+Banner -> User: Display ASCII art banner:\n╔═══════════════════════════════════╗\n║  🎬 TermiVoxed 🎬      ║\n║  AI Voice-Over & Subtitle        ║\n║  Integration                     ║\n╚═══════════════════════════════════╝
+deactivate Banner
+
+Main -> User: Application ready
+deactivate Main
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Files Created:**
+  - config.py loads from .env (or uses defaults)
+  - storage/ directory structure created
+  - logs/termivoxed.log initialized
+  - TTS cache loaded from storage/cache/tts_cache.json
+
+  **Configuration Values:**
+  - Quality presets: lossless (CRF 0), high (CRF 18), balanced (CRF 23)
+  - Audio mixing: TTS +3dB, BGM -16dB
+  - Fade duration: 3.0 seconds
+  - Max concurrent TTS: 2
+
+  **Logger Setup:**
+  - Console: colored output, INFO level
+  - File: detailed logs, DEBUG level, auto-rotation
+
+  **TTS Service:**
+  - 16 languages with pre-configured best voices
+  - Cache mechanism using MD5 hash keys
+  - Supports edge-tts library (Microsoft Edge TTS API)
+end note
+
+@enduml

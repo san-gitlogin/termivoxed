@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Console Video Editor - Run Script (Unix/Linux/macOS)
+# TermiVoxed - Run Script (Unix/Linux/macOS)
 # Author: Santhosh T
 
 # Activate virtual environment and run the editor

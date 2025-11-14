@@ -1,12 +1,12 @@
 @echo off
-REM Console Video Editor - Windows Setup Script
+REM TermiVoxed - Windows Setup Script
 REM Author: Santhosh T
 REM
-REM This script sets up the Console Video Editor on Windows systems
+REM This script sets up the TermiVoxed on Windows systems
 
 echo.
 echo ========================================
-echo Console Video Editor - Setup
+echo TermiVoxed - Setup
 echo ========================================
 echo.
 

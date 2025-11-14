@@ -1,0 +1,222 @@
+@startuml 06_Edit_Segment
+title Flow 6: Edit Segment
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/segment.py\n::Segment" as Segment
+participant "utils/voice_selector.py\n::VoiceSelector" as VoiceSelector
+participant "backend/tts_service.py\n::TTSService" as TTS
+
+== Edit Segment ==
+
+alt No segments exist
+    Main -> User: [yellow]No segments to edit[/yellow]
+else Segments exist
+    Main -> Main: list_segments()
+    Main -> User: Display segments table
+
+    Main -> User: Prompt: "Select segment number (0 to cancel)"
+    User --> Main: segment_num = 1
+
+    alt segment_num = 0 or invalid
+        Main -> Main: Return to project menu
+    else Valid segment
+        Main -> Timeline: segment = segments[segment_num - 1]
+        Timeline --> Main: segment
+
+        ' Validate language
+        Main -> Main: valid_languages = ['en', 'hi', 'ta', ...]
+        alt segment.language not in valid_languages
+            Main -> User: [yellow]⚠ Invalid language: '{language}'[/yellow]\n[yellow]Resetting to: 'en'[/yellow]
+            Main -> Segment: segment.language = "en"
+            Main -> Main: project.save()
+        end
+
+        Main -> User: Display:\n[bold cyan]Editing: {segment.name}[/bold cyan]\n[dim]Current language: {segment.language}[/dim]\n[dim]Note: Text will be REPLACED (not appended)[/dim]\n[yellow]Current text:[/yellow]\n  {segment.text[:150]}...
+
+        ' Multiline text input
+        Main -> User: Display:\nEnter new text:\n- Press Enter on empty line to keep current\n- Type/paste and press Enter when done\n- Multiline paste automatically joined
+
+        Main -> Main: _get_multiline_input(segment.text)
+        activate Main
+        Main -> Main: lines = []
+        loop Read lines
+            Main -> User: input()
+            User --> Main: line
+
+            alt First line empty
+                Main --> Main: Return current text (no change)
+            else Line empty and have lines
+                Main -> Main: Break loop
+            else Non-empty line
+                Main -> Main: lines.append(line)
+            end
+        end
+        Main -> Main: text = ' '.join(lines)
+        Main -> Main: Remove extra whitespace
+        Main --> Main: text
+        deactivate Main
+
+        alt User cancelled (Ctrl+C)
+            Main -> User: [yellow]Edit cancelled[/yellow]
+        else Text entered
+            Main -> Main: _sanitize_text(text)
+            activate Main
+            Main -> Main: Regex: Keep only \\w\\s\\.,!?\\-'";:()[]\nRemove: emojis, special Unicode
+            Main --> Main: sanitized_text
+            deactivate Main
+
+            alt Text changed after sanitization
+                Main -> User: [yellow]Some special characters were removed[/yellow]
+            end
+
+            Main -> User: Display preview:\n[green]Text to save ({len} chars):[/green]\n  {text[:200]}...
+
+            Main -> User: Confirm: "Is this correct?"
+            User --> Main: confirmed = True
+
+            alt Not confirmed
+                Main -> User: [yellow]Edit cancelled[/yellow]
+            else Confirmed
+                ' Voice parameters
+                Main -> User: Prompt: "Rate" [default: {current}]
+                User --> Main: rate = "+5%"
+
+                Main -> User: Prompt: "Volume" [default: {current}]
+                User --> Main: volume = "+0%"
+
+                Main -> User: Prompt: "Pitch" [default: {current}]
+                User --> Main: pitch = "+0Hz"
+
+                ' Language change
+                Main -> User: Confirm: "Change language?"
+                User --> Main: change_language = True
+
+                alt change_language
+                    Main -> User: Interactive list (inquirer):\nSelect language:\n• English (en)\n• Hindi (hi)\n...
+                    User --> Main: new_language = "hi"
+                    Main -> Segment: segment.language = "hi"
+                    Main -> User: [green]✓ Language changed to: hi[/green]
+                else Keep language
+                    Main -> Main: new_language = segment.language
+                end
+
+                ' Voice change
+                Main -> User: Confirm: "Change voice?"
+                User --> Main: change_voice = True
+
+                alt change_voice
+                    Main -> VoiceSelector: select_voice_interactive(\n  tts_service,\n  new_language,\n  segment.voice_id  # current voice\n)
+                    activate VoiceSelector
+                    VoiceSelector -> TTS: get_available_voices(new_language)
+                    TTS --> VoiceSelector: voices
+                    VoiceSelector -> User: Display voice table and selection
+                    User --> VoiceSelector: Selected voice
+                    VoiceSelector --> Main: voice (or None if cancelled)
+                    deactivate VoiceSelector
+
+                    alt voice = None
+                        Main -> Main: voice = segment.voice_id (keep current)
+                    end
+                else Keep voice
+                    Main -> Main: voice = segment.voice_id
+                end
+
+                ' Subtitle styling change
+                Main -> User: Confirm: "Change subtitle styling?"
+                User --> Main: change_styling = False
+
+                alt change_styling
+                    Main -> Main: _get_subtitle_styling_options(\n  segment.subtitle_font\n)
+                    Main -> User: Font, size, color, position, border prompts
+                    User --> Main: styling dict
+                else Keep styling
+                    Main -> Main: styling = None
+                end
+
+                ' Update segment
+                Main -> Main: old_text = segment.text\nold_voice = segment.voice_id
+
+                Main -> Segment: segment.text = text
+                Main -> Segment: segment.rate = rate
+                Main -> Segment: segment.volume = volume
+                Main -> Segment: segment.pitch = pitch
+                Main -> Segment: segment.voice_id = voice
+
+                alt styling not None
+                    Main -> Segment: Update subtitle styling:\nsubtitle_font, subtitle_size,\nsubtitle_color, subtitle_position,\nsubtitle_border_enabled,\nsubtitle_border_style,\nsubtitle_outline_width,\nsubtitle_outline_color,\nsubtitle_shadow
+                    Main -> User: [green]✓ Subtitle styling updated[/green]
+                end
+
+                Main -> Main: project.save()
+                Main -> User: [green]✓ Segment updated and saved[/green]
+
+                ' Check if regeneration needed
+                Main -> Main: text_changed = (old_text != text)\nvoice_changed = (old_voice != voice)
+
+                alt text_changed OR voice_changed
+                    alt text_changed
+                        Main -> User: [yellow]Text changed - audio regeneration recommended[/yellow]
+                    end
+                    alt voice_changed
+                        Main -> User: [yellow]Voice changed - audio regeneration recommended[/yellow]
+                    end
+
+                    Main -> User: Confirm: "Regenerate voice-over audio?"
+                    User --> Main: regenerate = True
+
+                    alt regenerate
+                        Main -> Main: generate_segment_audio(segment)
+                        Note over Main: Calls TTS service to regenerate audio
+                        Main -> Main: project.save()
+                    end
+                end
+            end
+        end
+    end
+end
+
+note over User, Timeline
+  **Technical Details:**
+
+  **Language Validation:**
+  - Valid: ['en', 'hi', 'ta', 'te', 'kn', 'ml', 'fr', 'es',\n          'de', 'ko', 'ja', 'zh', 'ar', 'ru', 'pt', 'it']
+  - Invalid codes auto-corrected to 'en'
+
+  **Multiline Input:**
+  - Reads lines until empty line
+  - Joins with spaces (not newlines)
+  - First empty line: keeps current text
+  - Ctrl+C: cancels edit
+
+  **Text Sanitization:**
+  - Removes emojis and special Unicode
+  - Keeps: alphanumeric, spaces, punctuation
+  - Regex: [^\\w\\s\\.,!?\\-'";:()\\[\\]]+
+
+  **Voice Selection:**
+  - Shows current voice marked as [CURRENT]
+  - Interactive preview with audio playback
+  - Can cancel to keep current voice
+
+  **Subtitle Styling:**
+  - All segment properties editable
+  - Font: Google Fonts integration
+  - Color: ASS hex format (&H00BBGGRR)
+  - Border: Style, width, color, shadow
+
+  **Audio Regeneration:**
+  - Recommended if text or voice changed
+  - User can skip if only styling/timing changed
+  - Uses existing TTS cache if unchanged
+
+  **Project Save:**
+  - Saves immediately after update
+  - Saves again after audio regeneration
+  - JSON with updated modified_at timestamp
+end note
+
+@enduml

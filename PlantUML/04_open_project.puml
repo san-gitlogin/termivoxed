@@ -1,0 +1,169 @@
+@startuml 04_Open_Existing_Project
+title Flow 4: Open Existing Project
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/segment.py\n::Segment" as Segment
+database "File System" as FileSystem
+
+== Open Existing Project ==
+
+Main -> Project: list_projects() [classmethod]
+activate Project
+Project -> FileSystem: Iterate over directories:\nstorage/projects/*/
+activate FileSystem
+loop For each project directory
+    FileSystem --> Project: project_dir
+    Project -> FileSystem: Check if project.json exists
+    alt project.json exists
+        FileSystem -> FileSystem: Read file:\nstorage/projects/{name}/project.json
+        FileSystem --> Project: JSON content
+        Project -> Project: Parse JSON:\ndata = json.load(f)
+        Project -> Project: Extract metadata:\nname = data["name"]\nvideo_path = data["video_path"]\ncreated_at = data["created_at"]\nmodified_at = data["modified_at"]\nsegments_count = len(data["timeline"]["segments"])
+        Project -> Project: Append to projects list
+    end
+end
+deactivate FileSystem
+Project -> Project: Sort projects by modified_at\n(most recent first)
+Project --> Main: projects = [\n  {name, video_path, created_at,\n   modified_at, segments_count},\n  ...\n]
+deactivate Project
+
+alt No projects found
+    Main -> User: [yellow]No projects found[/yellow]
+    Main -> Main: Return to main menu
+else Projects exist
+    ' Display projects table
+    Main -> User: Display table:\n╔════════════════════════════════════╗\n║     Available Projects             ║\n╠════╦══════╦════════╦══════╦═══════╣\n║ No ║ Name ║ Video  ║ Segs ║ Mod   ║\n╠════╬══════╬════════╬══════╬═══════╣\n║ 1  ║ Proj1║ vid.mp4║  5   ║ 08:00 ║\n║ 2  ║ Proj2║ v2.mp4 ║  3   ║ 07:30 ║\n╚════╩══════╩════════╩══════╩═══════╝
+
+    Main -> User: Prompt: "Select project number (0 to cancel)"\nDefault: 1
+    User --> Main: choice = 1
+
+    alt choice = 0 or choice > project count
+        Main -> Main: Return to main menu
+    else Valid project selected
+        Main -> Main: project_name = projects[choice - 1]["name"]
+
+        Main -> Project: load(project_name) [classmethod]
+        activate Project
+
+        Project -> FileSystem: Read file:\nstorage/projects/{project_name}/project.json
+        activate FileSystem
+        FileSystem --> Project: JSON content
+        deactivate FileSystem
+
+        Project -> Project: Parse JSON:\nproject_data = json.load(f)
+
+        Project -> Project: Create Project instance:\nproject = Project(\n  name=project_data["name"],\n  video_path=project_data["video_path"]\n)
+
+        ' Restore timeline
+        Project -> Timeline: from_dict(project_data["timeline"])
+        activate Timeline
+
+        Timeline -> Timeline: Create Timeline instance:\ntimeline = Timeline(video_path)
+
+        Timeline -> Timeline: Restore properties:\nvideo_duration = data["video_duration"]\nvideo_info = data.get("video_info", {})
+
+        ' Restore segments
+        loop For each segment in data["segments"]
+            Timeline -> Segment: from_dict(segment_data)
+            activate Segment
+            Segment -> Segment: Create Segment using dataclass:\nSegment(**segment_data)\n\nRestores all properties:\n- id (UUID)\n- name\n- start_time, end_time\n- text, language\n- voice_id, rate, volume, pitch\n- audio_path, subtitle_path\n- subtitle_enabled\n- subtitle_font, subtitle_size\n- subtitle_color, subtitle_position\n- subtitle_border_enabled\n- subtitle_border_style\n- subtitle_outline_width\n- subtitle_outline_color\n- subtitle_shadow\n- subtitle_shadow_color\n- sync_mode
+            Segment --> Timeline: Segment instance
+            deactivate Segment
+            Timeline -> Timeline: Append to segments list
+        end
+
+        Timeline --> Project: Timeline instance
+        deactivate Timeline
+
+        ' Restore project metadata
+        Project -> Project: Restore properties:\ncreated_at = datetime.fromisoformat(\n  project_data["created_at"]\n)\nmodified_at = datetime.fromisoformat(\n  project_data["modified_at"]\n)\nbackground_music_path = project_data.get(\n  "background_music_path"\n)\nexport_quality = project_data.get(\n  "export_quality", "balanced"\n)\ninclude_subtitles = project_data.get(\n  "include_subtitles", True\n)
+
+        Project --> Main: Project instance (fully restored)
+        deactivate Project
+
+        Main -> User: [green]✓ Project loaded: {project_name}[/green]
+        Main -> Main: Navigate to project_menu()
+    end
+end
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Project Discovery:**
+  - Scans: storage/projects/*/project.json
+  - Validates: Each JSON file is parseable
+  - Sorting: By modified_at descending (most recent first)
+
+  **JSON Structure:**
+  {
+    "name": "ProjectName",
+    "video_path": "/absolute/path/to/video.mp4",
+    "timeline": {
+      "video_path": "...",
+      "video_duration": 120.5,
+      "video_info": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30.0,
+        "codec": "h264",
+        "pix_fmt": "yuv420p"
+      },
+      "segments": [
+        {
+          "id": "uuid-string",
+          "name": "Segment 1",
+          "start_time": 0.0,
+          "end_time": 10.0,
+          "text": "Voice-over text",
+          "language": "en",
+          "voice_id": "en-US-AvaMultilingualNeural",
+          "rate": "+0%",
+          "volume": "+0%",
+          "pitch": "+0Hz",
+          "audio_path": "storage/projects/Name/en/Segment_1.mp3",
+          "subtitle_path": "storage/projects/Name/en/Segment_1.srt",
+          "subtitle_enabled": true,
+          "subtitle_font": "Roboto",
+          "subtitle_size": 20,
+          "subtitle_color": "&H00FFFFFF",
+          "subtitle_position": 30,
+          "subtitle_border_enabled": true,
+          "subtitle_border_style": 1,
+          "subtitle_outline_width": 2.0,
+          "subtitle_outline_color": "&H00000000",
+          "subtitle_shadow": 0.0,
+          "subtitle_shadow_color": "&H80000000",
+          "sync_mode": "auto"
+        }
+      ]
+    },
+    "created_at": "2025-11-14T08:00:00.123456",
+    "modified_at": "2025-11-14T09:30:00.123456",
+    "background_music_path": null,
+    "export_quality": "balanced",
+    "include_subtitles": true
+  }
+
+  **Deserialization:**
+  - Timeline.from_dict(): Restores timeline from dict
+  - Segment.from_dict(): Uses dataclass **kwargs unpacking
+  - Datetime: ISO 8601 format with fromisoformat()
+
+  **Error Handling:**
+  - Missing project.json: Skipped with warning
+  - Corrupt JSON: Logged and skipped
+  - Missing fields: Uses default values (.get())
+
+  **Table Display:**
+  - Uses Rich Table with columns
+  - Truncates long video names
+  - Shows creation and modification times
+  - Segment count from timeline
+end note
+
+@enduml

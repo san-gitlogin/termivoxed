@@ -1,0 +1,124 @@
+@startuml 03_Create_New_Project
+title Flow 3: Create New Project
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "backend/ffmpeg_utils.py\n::FFmpegUtils" as FFmpeg
+participant "FFprobe Binary" as FFprobeBin
+database "File System" as FileSystem
+
+== Create New Project ==
+
+Main -> User: Prompt: "Project name"
+User --> Main: project_name = "MyProject"
+
+Main -> User: Prompt: "Video file path (absolute path)"
+User --> Main: video_path = "/path/to/video.mp4"
+
+Main -> FileSystem: Check if file exists:\nPath(video_path).exists()
+activate FileSystem
+alt Video file not found
+    FileSystem --> Main: False
+    Main -> User: [red]Error: Video file not found[/red]
+    Main -> Main: Return to main menu
+else Video file exists
+    FileSystem --> Main: True
+    deactivate FileSystem
+
+    Main -> Project: Create Project(project_name, video_path)
+    activate Project
+
+    Project -> Timeline: Initialize Timeline(video_path)
+    activate Timeline
+
+    ' Get video duration
+    Timeline -> FFmpeg: get_media_duration(video_path)
+    activate FFmpeg
+    FFmpeg -> FFprobeBin: Execute command:\nffprobe -v quiet\n-show_entries format=duration\n-of csv=p=0\n{video_path}
+    activate FFprobeBin
+    FFprobeBin -> FFprobeBin: Parse video file\nExtract duration from container metadata
+    FFprobeBin --> FFmpeg: stdout: "120.5"
+    deactivate FFprobeBin
+    FFmpeg -> FFmpeg: Parse stdout:\nfloat(result.stdout.strip())
+    FFmpeg --> Timeline: duration = 120.5 seconds
+    deactivate FFmpeg
+
+    ' Get video info
+    Timeline -> FFmpeg: get_video_info(video_path)
+    activate FFmpeg
+    FFmpeg -> FFprobeBin: Execute command:\nffprobe -v quiet\n-select_streams v:0\n-show_entries stream=width,height,\npix_fmt,codec_name,r_frame_rate\n-of csv=p=0\n{video_path}
+    activate FFprobeBin
+    FFprobeBin -> FFprobeBin: Parse video stream metadata
+    FFprobeBin --> FFmpeg: stdout: "1920,1080,yuv420p,h264,30/1"
+    deactivate FFprobeBin
+    FFmpeg -> FFmpeg: Parse CSV output:\nwidth = int(info[0]) = 1920\nheight = int(info[1]) = 1080\npix_fmt = info[2] = "yuv420p"\ncodec = info[3] = "h264"\nfps = parse_fraction(info[4]) = 30.0
+    FFmpeg --> Timeline: video_info = {\n  'width': 1920,\n  'height': 1080,\n  'pix_fmt': 'yuv420p',\n  'codec': 'h264',\n  'fps': 30.0\n}
+    deactivate FFmpeg
+
+    Timeline -> Timeline: Initialize empty segments list:\nsegments = []
+    Timeline --> Project: Timeline instance
+    deactivate Timeline
+
+    Project -> Project: Set metadata:\ncreated_at = datetime.now()\nmodified_at = datetime.now()\nbackground_music_path = None\nexport_quality = "balanced"\ninclude_subtitles = True
+
+    Project --> Main: Project instance
+    deactivate Project
+
+    ' Display video info to user
+    Main -> User: Display video information:\n\n[green]✓ Video loaded successfully[/green]\n  Duration: 120.50s\n  Resolution: 1920x1080\n  FPS: 30.0\n  Codec: h264
+
+    ' Save project
+    Main -> Project: save()
+    activate Project
+    Project -> FileSystem: Create directory:\nmkdir -p storage/projects/MyProject/
+    Project -> Project: Serialize to JSON:\nproject_data = {\n  "name": "MyProject",\n  "video_path": "/path/to/video.mp4",\n  "timeline": {\n    "video_path": "/path/to/video.mp4",\n    "video_duration": 120.5,\n    "video_info": {...},\n    "segments": []\n  },\n  "created_at": "2025-11-14T08:00:00",\n  "modified_at": "2025-11-14T08:00:00",\n  "background_music_path": null,\n  "export_quality": "balanced",\n  "include_subtitles": true\n}
+    Project -> FileSystem: Write JSON to:\nstorage/projects/MyProject/project.json\nwith indent=2
+    FileSystem --> Project: File written
+    Project --> Main: save successful (True)
+    deactivate Project
+
+    Main -> User: [green]✓ Project created: MyProject[/green]
+
+    Main -> Main: Navigate to project_menu()
+end
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **File Validation:**
+  - Path(video_path).exists() checks file existence
+  - No format validation at creation (done later)
+
+  **FFprobe Queries:**
+  - Duration query: format=duration (container level)
+  - Video info query: stream=width,height,pix_fmt,codec_name,r_frame_rate
+  - Uses -select_streams v:0 for first video stream
+  - Output format: csv=p=0 (CSV without headers)
+
+  **Video Info Parsing:**
+  - FPS: Handles fraction format (e.g., "30/1" → 30.0)
+  - Error handling: Returns default values if parsing fails
+  - Pixel format: yuv420p is most common
+
+  **Project Storage:**
+  - Path: storage/projects/{project_name}/project.json
+  - Format: JSON with 2-space indentation
+  - Metadata: ISO 8601 timestamps
+
+  **Timeline Initialization:**
+  - video_path: Original video file path
+  - video_duration: Float (seconds)
+  - video_info: Dict with width, height, fps, codec, pix_fmt
+  - segments: Empty list (populated later)
+
+  **Default Settings:**
+  - export_quality: "balanced" (CRF 23)
+  - include_subtitles: true
+  - background_music_path: null
+end note
+
+@enduml

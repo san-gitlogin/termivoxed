@@ -1,4 +1,4 @@
-"""Data models for the console video editor"""
+"""Data models for the TermiVoxed"""
 
 from .segment import Segment
 from .timeline import Timeline

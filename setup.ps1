@@ -1,12 +1,12 @@
 #!/usr/bin/env pwsh
-# Console Video Editor - Windows PowerShell Setup Script
+# TermiVoxed - Windows PowerShell Setup Script
 # Author: Santhosh T
 #
-# This script sets up the Console Video Editor on Windows systems using PowerShell
+# This script sets up the TermiVoxed on Windows systems using PowerShell
 
 Write-Host ""
 Write-Host "========================================"  -ForegroundColor Cyan
-Write-Host "Console Video Editor - Setup"  -ForegroundColor Cyan
+Write-Host "TermiVoxed - Setup"  -ForegroundColor Cyan
 Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host ""
 

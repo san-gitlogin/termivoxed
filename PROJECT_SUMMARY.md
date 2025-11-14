@@ -1,4 +1,4 @@
-# Console Video Editor - Project Summary 🎬
+# TermiVoxed - Project Summary 🎬
 
 ## Overview
 
@@ -47,7 +47,9 @@ console_video_editor/
 ## 🎯 Key Features Implemented
 
 ### 1. **Proven FFmpeg Integration** ✅
+
 All FFmpeg commands use **exact patterns** from `FFmpeg_Video_Generation_Documentation.md`:
+
 - ✅ Media duration detection with ffprobe
 - ✅ Video segment extraction
 - ✅ Audio-video mixing with `amix` filter
@@ -58,7 +60,9 @@ All FFmpeg commands use **exact patterns** from `FFmpeg_Video_Generation_Documen
 - ✅ Quality presets (lossless CRF 0, high CRF 18, balanced CRF 23)
 
 ### 2. **Proven TTS Integration** ✅
+
 All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`:
+
 - ✅ edge-tts streaming with `Communicate()` and `SubMaker()`
 - ✅ Simultaneous audio + subtitle generation
 - ✅ MD5 caching strategy
@@ -68,6 +72,7 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 - ✅ Voice parameters (rate, volume, pitch)
 
 ### 3. **Timeline Management** ✅
+
 - ✅ Segment-based editing
 - ✅ Start/end time management
 - ✅ Validation (no overlaps, within bounds)
@@ -75,6 +80,7 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 - ✅ Audio path tracking
 
 ### 4. **Export Pipeline** ✅
+
 - ✅ Multi-step export process
 - ✅ Progress tracking
 - ✅ Segment processing
@@ -83,12 +89,14 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 - ✅ Cleanup of temporary files
 
 ### 5. **Project Management** ✅
+
 - ✅ Save/load projects (JSON format)
 - ✅ Project listing
 - ✅ Metadata tracking
 - ✅ File organization
 
 ### 6. **CLI Interface** ✅
+
 - ✅ Interactive menu system
 - ✅ Rich formatting and colors
 - ✅ Progress bars
@@ -100,11 +108,13 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 ## 🔧 Technologies Used
 
 ### Core Technologies
+
 - **Python 3.11+** - Programming language
 - **FFmpeg 6+** - Video processing
 - **edge-tts** - AI voice generation (Microsoft)
 
 ### Python Libraries
+
 - **Rich** - Terminal UI and formatting
 - **Loguru** - Logging
 - **Pydantic** - Configuration management
@@ -165,6 +175,7 @@ cd console_video_editor
 ```
 
 This will:
+
 - Create virtual environment
 - Install all dependencies
 - Create storage directories
@@ -201,11 +212,13 @@ python main.py            # Start the editor
 ### From FFmpeg_Video_Generation_Documentation.md
 
 ✅ **Get Media Duration:**
+
 ```python
 ffprobe -v quiet -show_entries format=duration -of csv=p=0 <file>
 ```
 
 ✅ **Mix Video + Audio + Subtitles:**
+
 ```python
 ffmpeg -i video.mp4 -i audio.wav \
   -vf 'ass=subtitles.ass' \
@@ -215,6 +228,7 @@ ffmpeg -i video.mp4 -i audio.wav \
 ```
 
 ✅ **Add Background Music:**
+
 ```python
 ffmpeg -i video.mp4 -i music.mp3 \
   -filter_complex '[0:a]volume=+3dB[v];[1:a]aloop=...,volume=-16dB[m];[v][m]amix[out]' \
@@ -224,6 +238,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
 ### From TTS_System_Documentation.md
 
 ✅ **TTS Generation with Streaming:**
+
 ```python
 communicate = edge_tts.Communicate(text, voice, rate, volume, pitch)
 submaker = edge_tts.SubMaker()
@@ -236,6 +251,7 @@ async for chunk in communicate.stream():
 ```
 
 ✅ **Caching Strategy:**
+
 ```python
 cache_key = hashlib.md5(f"{text}_{voice}_{rate}_{volume}_{pitch}".encode()).hexdigest()
 ```
@@ -244,20 +260,20 @@ cache_key = hashlib.md5(f"{text}_{voice}_{rate}_{volume}_{pitch}".encode()).hexd
 
 ## 📊 Features Comparison
 
-| Feature | Status | Implementation |
-|---------|--------|----------------|
-| Video Import | ✅ | FFprobe metadata extraction |
-| Timeline Segments | ✅ | Segment model with validation |
-| TTS Generation | ✅ | edge-tts with streaming |
-| Subtitle Generation | ✅ | Automatic SRT creation |
-| Subtitle Styling | ✅ | SRT→ASS with custom fonts |
-| Audio Mixing | ✅ | FFmpeg amix filter |
-| Background Music | ✅ | Looping with fade effects |
-| Quality Presets | ✅ | Lossless, High, Balanced |
-| Caching | ✅ | MD5-based file cache |
-| Project Save/Load | ✅ | JSON persistence |
-| Multi-language | ✅ | 80+ languages via edge-tts |
-| Progress Tracking | ✅ | Rich progress bars |
+| Feature             | Status | Implementation                |
+| ------------------- | ------ | ----------------------------- |
+| Video Import        | ✅     | FFprobe metadata extraction   |
+| Timeline Segments   | ✅     | Segment model with validation |
+| TTS Generation      | ✅     | edge-tts with streaming       |
+| Subtitle Generation | ✅     | Automatic SRT creation        |
+| Subtitle Styling    | ✅     | SRT→ASS with custom fonts     |
+| Audio Mixing        | ✅     | FFmpeg amix filter            |
+| Background Music    | ✅     | Looping with fade effects     |
+| Quality Presets     | ✅     | Lossless, High, Balanced      |
+| Caching             | ✅     | MD5-based file cache          |
+| Project Save/Load   | ✅     | JSON persistence              |
+| Multi-language      | ✅     | 80+ languages via edge-tts    |
+| Progress Tracking   | ✅     | Rich progress bars            |
 
 ---
 
@@ -317,6 +333,7 @@ self.store_cache_mapping(cache_key, audio_path, subtitle_path)
 ## 📖 Documentation
 
 All documentation is included:
+
 - **README.md** - Complete user guide
 - **QUICK_START.md** - 5-minute quick start
 - **PROJECT_SUMMARY.md** - This file
@@ -337,6 +354,7 @@ All documentation is included:
 ### ✅ No Static Versions
 
 All dependencies use **latest versions**:
+
 ```txt
 textual
 rich
@@ -361,6 +379,7 @@ loguru
 ### For Developers
 
 The codebase is ready for:
+
 - ✅ Adding more voice parameters
 - ✅ Implementing advanced TUI with Textual
 - ✅ Adding video effects
@@ -406,6 +425,7 @@ The codebase is ready for:
 ## 🙏 Credits
 
 Built on proven patterns from:
+
 - **Your existing FastAPI backend** - TTS and file management
 - **FFmpeg_Video_Generation_Documentation.md** - Video processing
 - **TTS_System_Documentation.md** - Edge-TTS integration
@@ -425,6 +445,6 @@ If you encounter issues:
 
 ---
 
-**🎬 The console video editor is complete and ready to use! 🎙️**
+**🎬 The TermiVoxed is complete and ready to use! 🎙️**
 
 **Enjoy adding AI voice-overs to your videos!**

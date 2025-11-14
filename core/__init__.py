@@ -1,4 +1,4 @@
-"""Core logic for the console video editor"""
+"""Core logic for the TermiVoxed"""
 
 from .export_pipeline import ExportPipeline
 

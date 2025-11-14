@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Console Video Editor - Dependency Checker
+TermiVoxed - Dependency Checker
 Author: Santhosh T
 
-This script checks all dependencies required for the Console Video Editor.
+This script checks all dependencies required for the TermiVoxed.
 """
 
 import sys
@@ -140,7 +140,7 @@ def get_installation_instructions():
 
 def main():
     """Main dependency checker"""
-    print_header("Console Video Editor - Dependency Checker")
+    print_header("TermiVoxed - Dependency Checker")
 
     # System Information
     print(f"Platform:   {platform.platform()}")

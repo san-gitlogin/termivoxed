@@ -1,0 +1,186 @@
+@startuml 12_Save_Project
+title Flow 12: Save Project
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/segment.py\n::Segment" as Segment
+database "File System" as FileSystem
+
+== Save Project ==
+
+Main -> User: User selects: "8. Save Project"
+
+Main -> Project: save()
+activate Project
+
+' Create directory
+Project -> FileSystem: Create directory:\nmkdir -p storage/projects/{project.name}/
+activate FileSystem
+FileSystem --> Project: Directory created/exists
+deactivate FileSystem
+
+' Update timestamp
+Project -> Project: Update modified_at:\nself.modified_at = datetime.now()
+
+' Serialize to dict
+Project -> Project: Build project_data dict:\nproject_data = {\n  "name": self.name,\n  "video_path": self.video_path,\n  "timeline": ?,  # Need to serialize\n  "created_at": self.created_at.isoformat(),\n  "modified_at": self.modified_at.isoformat(),\n  "background_music_path": self.background_music_path,\n  "export_quality": self.export_quality,\n  "include_subtitles": self.include_subtitles\n}
+
+' Serialize timeline
+Project -> Timeline: to_dict()
+activate Timeline
+
+Timeline -> Timeline: Build timeline_dict:\ntimeline_dict = {\n  "video_path": self.video_path,\n  "video_duration": self.video_duration,\n  "video_info": self.video_info,\n  "segments": []  # Need to serialize\n}
+
+' Serialize each segment
+loop For each segment in self.segments
+    Timeline -> Segment: to_dict()
+    activate Segment
+
+    Segment -> Segment: Use dataclasses.asdict(self):\nsegment_dict = {\n  "id": self.id,\n  "name": self.name,\n  "start_time": self.start_time,\n  "end_time": self.end_time,\n  "text": self.text,\n  "language": self.language,\n  "voice_id": self.voice_id,\n  "rate": self.rate,\n  "volume": self.volume,\n  "pitch": self.pitch,\n  "audio_path": self.audio_path,\n  "subtitle_path": self.subtitle_path,\n  "subtitle_enabled": self.subtitle_enabled,\n  "subtitle_font": self.subtitle_font,\n  "subtitle_size": self.subtitle_size,\n  "subtitle_color": self.subtitle_color,\n  "subtitle_position": self.subtitle_position,\n  "subtitle_border_enabled": self.subtitle_border_enabled,\n  "subtitle_border_style": self.subtitle_border_style,\n  "subtitle_outline_width": self.subtitle_outline_width,\n  "subtitle_outline_color": self.subtitle_outline_color,\n  "subtitle_shadow": self.subtitle_shadow,\n  "subtitle_shadow_color": self.subtitle_shadow_color,\n  "sync_mode": self.sync_mode\n}
+
+    Segment --> Timeline: segment_dict
+    deactivate Segment
+
+    Timeline -> Timeline: Append to segments list
+end
+
+Timeline --> Project: timeline_dict
+deactivate Timeline
+
+Project -> Project: Add timeline to project_data:\nproject_data["timeline"] = timeline_dict
+
+' Write to file
+Project -> FileSystem: Write JSON file:\nwith open(project_file, 'w', encoding='utf-8') as f:\n    json.dump(project_data, f, indent=2)
+activate FileSystem
+
+FileSystem -> FileSystem: Write to:\nstorage/projects/{project.name}/project.json
+
+FileSystem --> Project: File written successfully
+deactivate FileSystem
+
+Project -> Project: Log: Project saved: {self.name}
+
+Project --> Main: save() returns True
+deactivate Project
+
+Main -> User: [green]✓ Project saved[/green]
+
+Main -> Main: Return to project menu
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Save Process:**
+  1. Create project directory (if not exists)
+  2. Update modified_at timestamp
+  3. Serialize project to dict
+  4. Serialize timeline to dict
+  5. Serialize all segments to dicts
+  6. Write JSON with 2-space indentation
+  7. Log success
+
+  **JSON Structure:**
+  {
+    "name": "ProjectName",
+    "video_path": "/absolute/path/to/video.mp4",
+    "created_at": "2025-11-14T08:00:00.123456",
+    "modified_at": "2025-11-14T09:30:00.123456",
+    "background_music_path": null,
+    "export_quality": "balanced",
+    "include_subtitles": true,
+    "timeline": {
+      "video_path": "/absolute/path/to/video.mp4",
+      "video_duration": 120.5,
+      "video_info": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30.0,
+        "codec": "h264",
+        "pix_fmt": "yuv420p"
+      },
+      "segments": [
+        {
+          "id": "uuid-string",
+          "name": "Segment 1",
+          "start_time": 0.0,
+          "end_time": 10.0,
+          "text": "Voice-over text",
+          "language": "en",
+          "voice_id": "en-US-AvaMultilingualNeural",
+          "rate": "+0%",
+          "volume": "+0%",
+          "pitch": "+0Hz",
+          "audio_path": "storage/projects/.../Segment_1.mp3",
+          "subtitle_path": "storage/projects/.../Segment_1.srt",
+          "subtitle_enabled": true,
+          "subtitle_font": "Roboto",
+          "subtitle_size": 20,
+          "subtitle_color": "&H00FFFFFF",
+          "subtitle_position": 30,
+          "subtitle_border_enabled": true,
+          "subtitle_border_style": 1,
+          "subtitle_outline_width": 2.0,
+          "subtitle_outline_color": "&H00000000",
+          "subtitle_shadow": 0.0,
+          "subtitle_shadow_color": "&H80000000",
+          "sync_mode": "auto"
+        }
+      ]
+    }
+  }
+
+  **Serialization Methods:**
+  - Project.save(): Orchestrates entire save
+  - Timeline.to_dict(): Converts timeline to dict
+  - Segment.to_dict(): Uses dataclasses.asdict()
+  - datetime.isoformat(): ISO 8601 format
+
+  **File Path:**
+  - storage/projects/{project.name}/project.json
+  - Absolute path construction: project_dir / "project.json"
+
+  **Timestamp Format:**
+  - ISO 8601: YYYY-MM-DDTHH:MM:SS.ffffff
+  - Example: "2025-11-14T08:00:00.123456"
+  - Timezone: None (local time)
+  - Restoration: datetime.fromisoformat()
+
+  **Auto-Save Triggers:**
+  - After adding segment
+  - After editing segment
+  - After deleting segment
+  - After generating audio (if requested)
+  - After auto-extending segments
+  - User explicit save (Option 8)
+
+  **What's Saved:**
+  - Project metadata (name, paths, settings)
+  - Timeline (video info, duration)
+  - All segments with complete properties
+  - Timestamps (created, modified)
+  - Export settings (quality, subtitles, music)
+
+  **What's NOT Saved:**
+  - Generated audio/subtitle files (persist separately)
+  - Temp files
+  - Cache data
+  - UI state
+
+  **Error Handling:**
+  - Directory creation failure: Exception raised
+  - JSON write failure: Exception raised, logged
+  - Returns: True on success, False on failure
+  - Caller handles errors with user notification
+
+  **Performance:**
+  - Fast for small projects (<100 segments)
+  - JSON size: ~1KB per segment
+  - Write: Atomic (overwrite existing file)
+  - No backup created automatically
+end note
+
+@enduml

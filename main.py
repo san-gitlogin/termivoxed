@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Console Video Editor - Main Entry Point
+TermiVoxed - Main Entry Point
 A powerful terminal-based video editor for adding AI voice-overs and subtitles
 """
 
@@ -36,7 +36,7 @@ class ConsoleEditor:
         banner = """
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
-║     🎬 CONSOLE VIDEO EDITOR 🎬                       ║
+║     🎬 TermiVoxed 🎬                       ║
 ║                                                       ║
 ║     AI Voice-Over & Subtitle Integration             ║
 ║                                                       ║
@@ -1294,7 +1294,7 @@ class ConsoleEditor:
                 elif choice == "3":
                     self.list_projects()
                 elif choice == "4":
-                    console.print("\n[cyan]Thank you for using Console Video Editor![/cyan]")
+                    console.print("\n[cyan]Thank you for using TermiVoxed![/cyan]")
                     break
 
             except KeyboardInterrupt:

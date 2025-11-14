@@ -1,0 +1,55 @@
+@startuml 02_Main_Menu_Navigation
+title Flow 2: Main Menu Navigation
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "main.py\n::show_main_menu()" as MainMenu
+
+== Main Menu Navigation ==
+
+Main -> MainMenu: show_main_menu()
+activate MainMenu
+MainMenu -> User: Display menu options:\n\n[bold cyan]Main Menu[/bold cyan]\n1. Create New Project\n2. Open Existing Project\n3. List All Projects\n4. Exit\n\nSelect option [1-4]:
+User --> MainMenu: User input (1, 2, 3, or 4)
+MainMenu --> Main: choice
+deactivate MainMenu
+
+alt choice = "1"
+    Main -> Main: Navigate to create_new_project()
+else choice = "2"
+    Main -> Main: Navigate to open_existing_project()
+else choice = "3"
+    Main -> Main: Navigate to list_projects()
+else choice = "4"
+    Main -> User: Thank you for using TermiVoxed!
+    Main -> Main: Exit application
+end
+
+note over User, MainMenu
+  **Technical Details:**
+
+  **UI Library:**
+  - Uses Rich library for formatted console output
+  - Prompt.ask() with choices validation
+  - Bold cyan styling for menu title
+
+  **Main Loop:**
+  - Runs in while True loop in async_main()
+  - Handles KeyboardInterrupt for graceful exit
+  - Exception handling for unexpected errors
+
+  **Navigation:**
+  - Choice 1 → create_new_project() (async)
+  - Choice 2 → open_existing_project() (async)
+  - Choice 3 → list_projects() (sync)
+  - Choice 4 → break loop and exit
+
+  **Error Handling:**
+  - Invalid input: Prompt.ask() validates choices
+  - Ctrl+C: Asks "Exit application?" confirmation
+  - Exceptions: Logged and displayed to user
+end note
+
+@enduml

@@ -1,0 +1,322 @@
+@startuml 09_Export_Video
+title Flow 9: Export Video (Complete Pipeline)
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "core/export_pipeline.py\n::ExportPipeline" as Export
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "backend/tts_service.py\n::TTSService" as TTS
+participant "backend/ffmpeg_utils.py\n::FFmpegUtils" as FFmpeg
+participant "backend/subtitle_utils.py\n::SubtitleUtils" as Subtitle
+participant "utils/font_manager.py\n::FontManager" as FontMgr
+participant "FFmpeg Binary" as FFmpegBin
+participant "FFprobe Binary" as FFprobeBin
+database "File System" as FileSystem
+
+== Export Video ==
+
+Main -> User: Display: [bold green]Export Video[/bold green]
+
+' Validate timeline
+Main -> Timeline: validate_timeline()
+activate Timeline
+Timeline -> Timeline: errors = []
+loop For each segment
+    Timeline -> Timeline: segment.validate()
+    Timeline -> Timeline: Check overlaps
+    Timeline -> Timeline: Check audio files exist
+end
+Timeline --> Main: errors list
+deactivate Timeline
+
+alt Errors found
+    Main -> User: Display errors:\n[red]Timeline validation errors:[/red]\n• Segment X: invalid timing\n• Audio missing for Segment Y
+    Main -> User: Confirm: "Continue export anyway?"
+    User --> Main: continue
+    alt User cancels
+        Main -> Main: Return to project menu
+    end
+end
+
+' Get export settings
+Main -> User: Prompt: "Output file path"\n[default: {project_name}_output.mp4]
+User --> Main: output_path = "MyProject_output.mp4"
+
+Main -> User: Display quality presets:\n1. Lossless (best quality, largest file)\n2. High (near-lossless)\n3. Balanced (good quality, smaller file)
+User --> Main: quality_choice = "3"
+Main -> Main: quality = "balanced" (CRF 23)
+
+Main -> User: Confirm: "Include subtitles?"
+User --> Main: include_subtitles = True
+
+Main -> User: Confirm: "Add background music?"
+User --> Main: add_bgm = False
+
+Main -> User: Display: [bold]Starting export...[/bold]
+
+Main -> Export: Create ExportPipeline(project)
+activate Export
+
+Export -> Export: export(\n  output_path,\n  quality="balanced",\n  include_subtitles=True,\n  background_music_path=None,\n  progress_callback=callback\n)
+
+' Step 0: Ensure fonts available
+alt include_subtitles = True
+    Export -> User: Progress: Checking font availability... (0%)
+    Export -> Export: Collect unique fonts from segments
+    loop For each unique font
+        Export -> FontMgr: ensure_font_available(font_name)
+        activate FontMgr
+        alt Font not installed
+            FontMgr -> FontMgr: download_google_font(font_name)
+            FontMgr -> FileSystem: Download to storage/fonts/
+            FontMgr -> FileSystem: Install to system font directory
+            FontMgr -> FontMgr: Update font cache
+        end
+        FontMgr --> Export: Success
+        deactivate FontMgr
+    end
+end
+
+' Step 1: Generate all TTS audio
+Export -> User: Progress: Generating audio for segments... (5%)
+loop For each segment
+    alt audio_path missing or doesn't exist
+        Export -> TTS: generate_audio(...)
+        TTS --> Export: (audio_path, subtitle_path)
+        Export -> Export: segment.audio_path = audio_path
+    else audio exists
+        Export -> Export: Log: Using cached audio
+    end
+end
+
+' Step 2: Process segments
+Export -> User: Progress: Processing video segments... (30%)
+
+Export -> FFprobe: get_media_duration(video_path)
+FFprobe --> Export: video_duration = 120.5s
+
+' Validate and auto-extend segments
+Export -> Export: _validate_audio_lengths(video_duration)
+loop For each segment
+    Export -> FFprobe: get_media_duration(audio_path)
+    FFprobe --> Export: audio_duration
+    alt audio_duration > segment_duration + 1.0s
+        alt Can extend (no following segments blocking)
+            Export -> Export: segment.end_time = start + audio_duration
+            Export -> Export: Log: Auto-extended segment
+            Export -> Export: project.save()
+        else Cannot extend
+            Export -> Export: Log: Warning - audio will be truncated
+        end
+    end
+end
+
+Export -> Export: all_parts = []\ncurrent_time = 0.0\nsorted_segments = sort by start_time
+
+loop For each segment (i=0, 1, 2, ...)
+    ' Extract pre-segment gap
+    alt current_time < segment.start_time
+        Export -> Export: part_path = temp/part_before_{i}.mp4
+        Export -> FFmpeg: extract_video_segment(\n  video_path, current_time,\n  segment.start_time, part_path,\n  re_encode=True\n)
+        activate FFmpeg
+        FFmpeg -> FFmpegBin: ffmpeg -ss {start} -i {video}\n-t {duration} -c:v libx264 -c:a aac\n-preset medium -crf 23 -pix_fmt yuv420p\n-y {output}
+        FFmpegBin --> FFmpeg: Success
+        FFmpeg --> Export: Success
+        deactivate FFmpeg
+        Export -> Export: all_parts.append(part_path)
+    end
+
+    ' Process segment with audio and subtitles
+    Export -> Export: segment_video_path = temp/segment_{i}_video.mp4
+
+    Export -> FFmpeg: extract_video_segment(\n  video_path, segment.start_time,\n  segment.end_time, segment_video_path,\n  re_encode=False\n)
+    activate FFmpeg
+    FFmpeg -> FFmpegBin: ffmpeg -ss {start} -i {video}\n-t {duration} -c copy -y {output}
+    FFmpegBin --> FFmpeg: Success
+    FFmpeg --> Export: Success
+    deactivate FFmpeg
+
+    ' Prepare subtitle
+    alt include_subtitles AND segment.subtitle_enabled
+        Export -> Export: ass_path = subtitle_path.replace('.srt', '.ass')
+        Export -> Export: Build style_options from segment:\n{\n  'fontname': segment.subtitle_font,\n  'fontsize': segment.subtitle_size,\n  'primarycolour': segment.subtitle_color,\n  'marginv': segment.subtitle_position,\n  'borderstyle': segment.subtitle_border_style,\n  'outline': segment.subtitle_outline_width,\n  'outlinecolour': segment.subtitle_outline_color,\n  'shadow': segment.subtitle_shadow\n}
+
+        Export -> Subtitle: create_custom_ass_style(\n  srt_path, ass_path, style_options\n)
+        activate Subtitle
+        Subtitle -> FFmpegBin: ffmpeg -i {srt_path} -y {ass_path}
+        FFmpegBin --> Subtitle: ASS file created
+        Subtitle -> FileSystem: Read ASS file
+        Subtitle -> Subtitle: Replace style line with custom:\nStyle: Default,{font},{size},{colors},...
+        Subtitle -> FileSystem: Write modified ASS
+        Subtitle --> Export: Success
+        deactivate Subtitle
+        Export -> Export: subtitle_path = ass_path
+    else
+        Export -> Export: subtitle_path = None
+    end
+
+    ' Process segment video with audio and subtitles
+    Export -> Export: processed_path = temp/segment_{i}_processed.mp4
+    Export -> FFmpeg: process_segment_video(\n  segment_video_path,\n  audio_path,\n  subtitle_path,\n  processed_path,\n  quality="balanced"\n)
+    activate FFmpeg
+
+    FFmpeg -> FFprobe: get_media_duration(video_path)
+    FFprobe --> FFmpeg: video_duration
+    FFmpeg -> FFprobe: get_media_duration(audio_path)
+    FFprobe --> FFmpeg: audio_duration
+
+    FFmpeg -> FFprobe: has_audio_stream(video_path)
+    FFprobe --> FFmpeg: has_video_audio = True/False
+
+    alt has_video_audio
+        FFmpeg -> FFmpeg: audio_filter =\n"[0:a][1:a]amix=inputs=2:\nduration=first:dropout_transition=0[aout]"
+    else no video audio
+        FFmpeg -> FFmpeg: audio_filter = "[1:a]anull[aout]"
+    end
+
+    alt subtitle_path exists
+        FFmpeg -> FFmpeg: Escape ASS path:\nass_escaped = path.replace('\\\\', '\\\\\\\\')\n                  .replace(':', '\\\\:')
+        FFmpeg -> FFmpegBin: ffmpeg -i {video} -i {audio}\n-vf "ass={ass_escaped}"\n-filter_complex "{audio_filter}"\n-map 0:v -map [aout]\n-c:v libx264 -c:a aac\n-preset medium -crf {crf}\n-y {output}
+    else no subtitles
+        FFmpeg -> FFmpegBin: ffmpeg -i {video} -i {audio}\n-filter_complex "{audio_filter}"\n-map 0:v -map [aout]\n-c:v libx264 -c:a aac\n-preset medium -crf {crf}\n-y {output}
+    end
+
+    FFmpegBin -> FFmpegBin: Process (timeout: 300s):\n1. Read video + audio streams\n2. Apply subtitle filter (if ass)\n3. Mix audio (amix filter)\n4. Encode video (libx264)\n5. Encode audio (aac)\n6. Mux to MP4
+    FFmpegBin --> FFmpeg: Success
+    FFmpeg --> Export: Success
+    deactivate FFmpeg
+
+    Export -> Export: all_parts.append(processed_path)
+    Export -> Export: current_time = segment.end_time
+    Export -> User: Progress: Processed {i+1}/{total} (50%)
+end
+
+' Extract post-segment gap
+alt current_time < video_duration
+    Export -> Export: part_path = temp/part_after_last.mp4
+    Export -> FFmpeg: extract_video_segment(\n  video_path, current_time,\n  video_duration, part_path,\n  re_encode=True\n)
+    FFmpeg --> Export: Success
+    Export -> Export: all_parts.append(part_path)
+end
+
+' Step 3: Concatenate all parts
+Export -> User: Progress: Combining video segments... (70%)
+
+Export -> Export: combined_path = temp/combined_{project_name}.mp4
+Export -> FFmpeg: concatenate_videos(all_parts, combined_path)
+activate FFmpeg
+
+FFmpeg -> FileSystem: Write concat file:\ntemp/concat_list.txt:\nfile '/abs/path/part_before_0.mp4'\nfile '/abs/path/segment_0_processed.mp4'\nfile '/abs/path/part_before_1.mp4'\n...
+
+FFmpeg -> FFmpegBin: ffmpeg -f concat -safe 0\n-i {concat_file}\n-c copy -y {output}
+FFmpegBin -> FFmpegBin: Concatenate all parts\nwithout re-encoding
+FFmpegBin --> FFmpeg: Success
+FFmpeg --> Export: Success
+deactivate FFmpeg
+
+' Step 4: Add background music (optional)
+alt background_music_path exists
+    Export -> User: Progress: Adding background music... (90%)
+    Export -> FFmpeg: add_background_music(\n  combined_path, music_path, output_path\n)
+    activate FFmpeg
+    FFmpeg -> FFprobe: get_media_duration(video_path)
+    FFprobe --> FFmpeg: video_dur
+    FFmpeg -> FFprobe: get_media_duration(music_path)
+    FFprobe --> FFmpeg: music_dur
+
+    FFmpeg -> FFmpeg: Calculate loops needed:\nloops = int(video_dur / music_dur) + 1
+
+    FFmpeg -> FFmpeg: Build filter:\n[0:a]volume=+3dB[boosted];\n[1:a]aloop=loop={loops}:size={samples},\nvolume=-16dB,\nafade=t=out:st={video_dur-3}:d=3,\natrim=duration={video_dur}[bg];\n[boosted][bg]amix=inputs=2:\nduration=first[aout]
+
+    FFmpeg -> FFmpegBin: ffmpeg -i {video} -i {music}\n-filter_complex "{filter}"\n-map 0:v -map [aout]\n-c:v copy -c:a aac -y {output}
+    FFmpegBin --> FFmpeg: Success
+    FFmpeg --> Export: Success
+    deactivate FFmpeg
+else no background music
+    Export -> FileSystem: shutil.copy(combined_path, output_path)
+end
+
+Export -> User: Progress: Export complete! (100%)
+
+' Cleanup
+Export -> Export: _cleanup_temp_files(all_parts, combined_path)
+loop For each temp file
+    Export -> FileSystem: os.unlink(file_path)
+end
+
+Export --> Main: Success
+deactivate Export
+
+Main -> FileSystem: Get file size: Path(output_path).stat().st_size
+FileSystem --> Main: size_bytes
+Main -> Main: size_mb = size_bytes / 1024 / 1024
+Main -> User: [green]✓ Export complete: MyProject_output.mp4[/green]\nFile size: 245.3 MB
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Export Pipeline Stages:**
+  1. Timeline validation (overlaps, missing audio)
+  2. Font availability check (download if needed)
+  3. TTS audio generation (for missing segments)
+  4. Audio length validation (auto-extend segments)
+  5. Video segment processing (extract + process + gaps)
+  6. Concatenation (all parts into single video)
+  7. Background music (optional, with looping/fade)
+  8. Cleanup (temp files)
+
+  **FFmpeg Operations:**
+  - extract_video_segment: Fast stream copy or re-encode
+  - process_segment_video: Audio mix + subtitle burn + encode
+  - concatenate_videos: Concat demuxer (-c copy)
+  - add_background_music: Audio filters (aloop, afade, amix)
+
+  **Video Segment Strategy:**
+  - Preserves full original video
+  - Only segments with voice-overs are processed
+  - Gaps between segments: fast stream copy
+  - Processed segments: audio mix + subtitle overlay
+  - Final: concatenate all parts seamlessly
+
+  **Audio Mixing:**
+  - amix filter: inputs=2, duration=first
+  - TTS boost: +3dB (configurable)
+  - BGM reduction: -16dB (configurable)
+  - Auto-handles different durations
+
+  **Subtitle Processing:**
+  - SRT → ASS conversion (ffmpeg)
+  - Custom style application (ASS format)
+  - Font embedding via system fonts
+  - Border/outline/shadow support
+  - Burned into video (not soft subs)
+
+  **Quality Presets:**
+  - Lossless: CRF 0, preset medium
+  - High: CRF 18, preset medium
+  - Balanced: CRF 23, preset medium
+  - Codec: libx264 (H.264)
+  - Audio: AAC
+
+  **File Paths:**
+  - Temp: storage/temp/part_*.mp4, segment_*_processed.mp4
+  - Combined: storage/temp/combined_{name}.mp4
+  - Output: User-specified path
+  - Concat list: storage/temp/concat_list.txt
+
+  **Error Handling:**
+  - FFmpeg timeout: 300s per segment
+  - Missing audio: Validation before export
+  - Font installation failures: Fallback to system default
+  - Segment processing failures: Logged, export continues
+
+  **Performance:**
+  - Sequential processing (not parallel)
+  - Stream copy for unchanged parts (fast)
+  - Re-encoding only for processed segments
+  - Cleanup temp files after export
+end note
+
+@enduml

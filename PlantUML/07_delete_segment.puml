@@ -1,0 +1,112 @@
+@startuml 07_Delete_Segment
+title Flow 7: Delete Segment
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/timeline.py\n::Timeline" as Timeline
+participant "models/project.py\n::Project" as Project
+database "File System" as FileSystem
+
+== Delete Segment ==
+
+alt No segments exist
+    Main -> User: [yellow]No segments to delete[/yellow]
+    Main -> Main: Return to project menu
+else Segments exist
+    Main -> Main: list_segments()
+    activate Main
+    Main -> User: Display segments table:\n╔════╦═══════╦═══════╦═══════╦══════════╦══════════════╦═══════╗\n║ No ║ Name  ║ Start ║ End   ║ Duration ║ Text         ║ Audio ║\n╠════╬═══════╬═══════╬═══════╬══════════╬══════════════╬═══════╣\n║ 1  ║ Intro ║ 0.00s ║ 10.0s ║ 10.00s   ║ Welcome to...║   ✓   ║\n║ 2  ║ Part2 ║ 15.0s ║ 25.0s ║ 10.00s   ║ In this...   ║   ✓   ║\n╚════╩═══════╩═══════╩═══════╩══════════╩══════════════╩═══════╝
+    deactivate Main
+
+    Main -> User: Prompt: "Select segment number (0 to cancel)"
+    User --> Main: segment_num = 1
+
+    alt segment_num = 0 or invalid
+        Main -> Main: Return to project menu
+    else Valid segment selected
+        Main -> Timeline: segment = segments[segment_num - 1]
+        activate Timeline
+        Timeline --> Main: segment
+        deactivate Timeline
+
+        Main -> User: Confirm: "Delete segment '{segment.name}'?"
+        User --> Main: confirm = True
+
+        alt User confirms deletion
+            Main -> Timeline: remove_segment(segment.id)
+            activate Timeline
+
+            Timeline -> Timeline: Filter segments list:\nsegments = [\n  s for s in self.segments\n  if s.id != segment_id\n]
+
+            Timeline -> Timeline: Log: Removed segment: {segment_id}
+
+            Timeline --> Main: removed = True
+            deactivate Timeline
+
+            Main -> Project: save()
+            activate Project
+            Project -> Project: Update modified_at = datetime.now()
+            Project -> Project: Serialize to JSON:\nproject_data = {...}
+            Project -> FileSystem: Write to:\nstorage/projects/{name}/project.json
+            FileSystem --> Project: Success
+            Project --> Main: save successful
+            deactivate Project
+
+            Main -> User: [green]✓ Segment deleted[/green]
+        else User cancels
+            Main -> Main: No action taken
+        end
+    end
+end
+
+Main -> Main: Return to project menu
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Deletion Process:**
+  1. List all segments with details (list_segments())
+  2. User selects segment by number (1-indexed)
+  3. Confirmation prompt before deletion
+  4. Remove from timeline.segments list
+  5. Save project to persist changes
+
+  **Timeline.remove_segment():**
+  - Input: segment_id (UUID string)
+  - Process: Filter segments list using list comprehension
+  - Returns: True if removed, False if not found
+  - Logging: Info level with segment ID
+
+  **File Operations:**
+  - Does NOT delete audio/subtitle files from disk
+  - Only removes from project.json
+  - Audio files remain in storage/projects/{name}/{lang}/
+  - Can be manually cleaned up later
+
+  **Safety:**
+  - Requires explicit confirmation
+  - Cancel option (0) available
+  - Invalid numbers handled gracefully
+  - Project auto-saved after deletion
+
+  **After Deletion:**
+  - Segment count updated in project stats
+  - Timeline coverage percentage recalculated
+  - Other segments unaffected
+  - Returns to project menu
+
+  **Use Cases:**
+  - Remove unwanted voice-over segments
+  - Fix timing conflicts by deleting overlapping segments
+  - Clean up test segments
+  - Restart segment creation
+
+  **Alternative to Deletion:**
+  - Edit segment timing instead
+  - Adjust overlapping segments
+  - Regenerate audio with different settings
+end note
+
+@enduml

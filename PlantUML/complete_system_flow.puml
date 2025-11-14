@@ -1,0 +1,1682 @@
+@startuml TermiVoxed_Complete_System_Flow
+title TermiVoxed - Complete End-to-End System Flow with Technical Details
+autonumber
+
+' ============================================================================
+' PARTICIPANTS - All System Components
+' ============================================================================
+
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "main.py\n::show_banner()" as Banner
+participant "main.py\n::show_main_menu()" as MainMenu
+
+box "Models Package" #LightBlue
+    participant "models/project.py\n::Project" as Project
+    participant "models/timeline.py\n::Timeline" as Timeline
+    participant "models/segment.py\n::Segment" as Segment
+end box
+
+box "Backend Package" #LightGreen
+    participant "backend/tts_service.py\n::TTSService" as TTS
+    participant "backend/ffmpeg_utils.py\n::FFmpegUtils" as FFmpeg
+    participant "backend/subtitle_utils.py\n::SubtitleUtils" as Subtitle
+end box
+
+box "Core Package" #LightYellow
+    participant "core/export_pipeline.py\n::ExportPipeline" as Export
+end box
+
+box "Utils Package" #LightCoral
+    participant "utils/voice_selector.py\n::VoiceSelector" as VoiceSelector
+    participant "utils/font_manager.py\n::FontManager" as FontMgr
+    participant "utils/google_fonts.py\n::parse_google_font_url()" as GoogleFonts
+    participant "utils/logger.py\n::logger" as Logger
+end box
+
+participant "config.py\n::Settings" as Config
+participant "edge-tts\n(External Library)" as EdgeTTS
+participant "FFmpeg Binary\n(External Tool)" as FFmpegBin
+participant "FFprobe Binary\n(External Tool)" as FFprobeBin
+database "File System\n::storage/projects/\n::storage/cache/\n::storage/temp/" as FileSystem
+
+' ============================================================================
+' FLOW 1: APPLICATION STARTUP
+' ============================================================================
+
+== FLOW 1: Application Startup & Initialization ==
+
+User -> Main: python main.py
+activate Main
+
+Main -> Config: Load settings from .env
+activate Config
+Config -> Config: Parse environment variables
+Config -> Config: Set default values\n(STORAGE_DIR, FFMPEG_PATH, etc.)
+Config -> FileSystem: create_directories()\nCreate storage/, projects/,\ntemp/, cache/, output/, fonts/
+Config --> Main: Settings instance (singleton)
+deactivate Config
+
+Main -> TTS: Initialize TTSService()
+activate TTS
+TTS -> TTS: Load cache from\nstorage/cache/tts_cache.json
+TTS -> TTS: Initialize best_voices dict\n(16 languages with optimal voices)
+TTS --> Main: TTSService instance
+deactivate TTS
+
+Main -> Logger: Initialize logging
+activate Logger
+Logger -> Logger: Setup console handler\n(stderr, colored, INFO level)
+Logger -> FileSystem: Setup file handler\n(logs/termivoxed.log, DEBUG level)
+Logger --> Main: Logger configured
+deactivate Logger
+
+Main -> Banner: show_banner()
+activate Banner
+Banner -> User: Display ASCII art banner\n🎬 TermiVoxed 🎬
+deactivate Banner
+
+' ============================================================================
+' FLOW 2: MAIN MENU NAVIGATION
+' ============================================================================
+
+== FLOW 2: Main Menu Navigation ==
+
+Main -> MainMenu: show_main_menu()
+activate MainMenu
+MainMenu -> User: Display menu options:\n1. Create New Project\n2. Open Existing Project\n3. List All Projects\n4. Exit
+User --> MainMenu: Select option (1-4)
+deactivate MainMenu
+
+' ============================================================================
+' FLOW 3: CREATE NEW PROJECT
+' ============================================================================
+
+== FLOW 3: Create New Project (Option 1) ==
+
+alt User selects "1. Create New Project"
+
+    Main -> User: Prompt: "Project name"
+    User --> Main: project_name = "MyProject"
+
+    Main -> User: Prompt: "Video file path (absolute path)"
+    User --> Main: video_path = "/path/to/video.mp4"
+
+    Main -> FileSystem: Check if file exists\nPath(video_path).exists()
+    alt Video file not found
+        FileSystem --> Main: False
+        Main -> User: Error: Video file not found
+        Main -> MainMenu: Return to main menu
+    else Video file exists
+        FileSystem --> Main: True
+
+        Main -> Project: Create Project(project_name, video_path)
+        activate Project
+
+        Project -> Timeline: Initialize Timeline(video_path)
+        activate Timeline
+
+        Timeline -> FFmpeg: get_media_duration(video_path)
+        activate FFmpeg
+        FFmpeg -> FFprobeBin: Execute:\nffprobe -v quiet\n-show_entries format=duration\n-of csv=p=0 video_path
+        activate FFprobeBin
+        FFprobeBin --> FFmpeg: duration = 120.5 seconds
+        deactivate FFprobeBin
+        FFmpeg --> Timeline: duration = 120.5
+        deactivate FFmpeg
+
+        Timeline -> FFmpeg: get_video_info(video_path)
+        activate FFmpeg
+        FFmpeg -> FFprobeBin: Execute:\nffprobe -v quiet\n-select_streams v:0\n-show_entries stream=width,height,\npix_fmt,codec_name,r_frame_rate
+        activate FFprobeBin
+        FFprobeBin --> FFmpeg: width=1920, height=1080,\npix_fmt=yuv420p,\ncodec=h264, fps=30/1
+        deactivate FFprobeBin
+        FFmpeg --> Timeline: video_info dict
+        deactivate FFmpeg
+
+        Timeline -> Timeline: Initialize empty segments list
+        Timeline --> Project: Timeline instance
+        deactivate Timeline
+
+        Project -> Project: Set metadata:\ncreated_at = datetime.now()\nmodified_at = datetime.now()\nexport_quality = "balanced"\ninclude_subtitles = True
+
+        Project --> Main: Project instance
+        deactivate Project
+
+        Main -> User: Display video info:\nDuration: 120.5s\nResolution: 1920x1080\nFPS: 30, Codec: h264
+
+        Main -> Project: save()
+        activate Project
+        Project -> FileSystem: Create directory:\nstorage/projects/MyProject/
+        Project -> Project: Serialize to JSON:\n- name, video_path\n- timeline (segments list)\n- metadata (dates, settings)
+        Project -> FileSystem: Write to:\nstorage/projects/MyProject/project.json
+        Project --> Main: save successful
+        deactivate Project
+
+        Main -> User: ✓ Project created: MyProject
+
+        Main -> Main: Navigate to project_menu()
+    end
+end
+
+' ============================================================================
+' FLOW 4: OPEN EXISTING PROJECT
+' ============================================================================
+
+== FLOW 4: Open Existing Project (Option 2) ==
+
+alt User selects "2. Open Existing Project"
+
+    Main -> Project: list_projects() [classmethod]
+    activate Project
+    Project -> FileSystem: Iterate over\nstorage/projects/*/project.json
+    FileSystem --> Project: List of project.json files
+    Project -> Project: Parse each JSON file,\nextract metadata
+    Project --> Main: projects = [\n{name, video_path, created_at,\nmodified_at, segments_count}, ...]
+    deactivate Project
+
+    alt No projects found
+        Main -> User: No projects found
+        Main -> MainMenu: Return to main menu
+    else Projects exist
+        Main -> User: Display table with projects:\nNo. | Name | Video | Segments | Modified
+
+        User --> Main: Select project number (0 to cancel)
+
+        alt User cancels (0) or invalid number
+            Main -> MainMenu: Return to main menu
+        else Valid project selected
+            Main -> Project: load(project_name) [classmethod]
+            activate Project
+            Project -> FileSystem: Read\nstorage/projects/{name}/project.json
+            FileSystem --> Project: JSON data
+            Project -> Project: Deserialize JSON
+            Project -> Timeline: from_dict(timeline_data)
+            activate Timeline
+            Timeline -> Timeline: Restore video_path, duration, info
+            loop For each segment in JSON
+                Timeline -> Segment: from_dict(segment_data)
+                activate Segment
+                Segment -> Segment: Restore all properties:\nid, name, start_time, end_time,\ntext, language, voice_id,\nrate, volume, pitch,\naudio_path, subtitle_path,\nsubtitle styling (font, size,\ncolor, position, border settings)
+                Segment --> Timeline: Segment instance
+                deactivate Segment
+                Timeline -> Timeline: Add to segments list
+            end
+            Timeline --> Project: Timeline instance
+            deactivate Timeline
+            Project -> Project: Restore metadata:\ncreated_at, modified_at,\nbackground_music_path,\nexport_quality, include_subtitles
+            Project --> Main: Project instance
+            deactivate Project
+
+            Main -> User: ✓ Project loaded: {project_name}
+            Main -> Main: Navigate to project_menu()
+        end
+    end
+end
+
+' ============================================================================
+' FLOW 5: PROJECT MENU & ADD SEGMENT
+' ============================================================================
+
+== FLOW 5: Project Menu - Add Segment (Option 1) ==
+
+loop Project Menu Loop
+    Main -> User: Display Project Menu:\nProject: {name}\nVideo: {file} (Duration: {dur}s)\nSegments: {count}\n\n1. Add Segment\n2. List Segments\n3. Edit Segment\n4. Delete Segment\n5. Generate Voice-Overs\n6. Export Video\n7. Project Settings\n8. Save Project\n9. Back to Main Menu
+
+    User --> Main: Select option
+
+    alt Option 1: Add Segment
+        Main -> User: Prompt: "Segment name"
+        User --> Main: name = "Intro"
+
+        loop Timing Input & Validation Loop
+            Main -> User: Prompt: "Start time (seconds)"
+            User --> Main: start_time = 0.0
+
+            Main -> User: Prompt: "End time (seconds)"
+            User --> Main: end_time = 10.0
+
+            Main -> Main: _validate_segment_timing(start_time, end_time)
+            activate Main
+
+            Main -> Main: Check: start_time >= 0?
+            Main -> Main: Check: end_time > start_time?
+            Main -> Main: Check: end_time <= video_duration?
+
+            Main -> Timeline: Check overlaps with existing segments
+            activate Timeline
+            loop For each existing segment
+                Timeline -> Timeline: Check if overlaps:\n!(new_end <= seg.start OR\n  new_start >= seg.end)
+            end
+            alt Overlaps found
+                Timeline --> Main: overlapping_segments list
+                Main -> User: Display error:\nSegment overlaps with {count} segment(s)
+                Main -> User: Show overlapping segments:\n• Segment1: 5s - 15s\n• Segment2: 8s - 12s
+
+                Main -> User: Display options:\n1. Re-enter segment times\n2. Remove overlapping segment(s)\n3. Edit overlapping segment(s)\n4. Cancel
+
+                User --> Main: Select option
+
+                alt Option 2: Remove overlapping
+                    Main -> User: Confirm removal?
+                    User --> Main: Confirm = Yes
+                    loop For each overlapping segment
+                        Main -> Timeline: remove_segment(segment.id)
+                        Timeline -> Timeline: Filter out segment from list
+                        Timeline --> Main: Segment removed
+                        Main -> User: ✓ Removed: {segment.name}
+                    end
+                    Main -> Project: save()
+                    Main -> Main: Break validation loop (resolved)
+                else Option 3: Edit overlapping
+                    loop For each overlapping segment
+                        Main -> User: Show segment details:\nCurrent: {start}s - {end}s\nDuration: {dur}s\n\nOptions:\na. Adjust start time\nb. Adjust end time\nc. Remove this segment\nd. Skip
+                        User --> Main: Select option (a/b/c/d)
+                        alt Adjust start/end
+                            Main -> User: Prompt new time
+                            User --> Main: new_time
+                            Main -> Segment: Update time
+                            Main -> Project: save()
+                            Main -> User: ✓ Updated
+                        else Remove
+                            Main -> Timeline: remove_segment(id)
+                            Main -> Project: save()
+                        end
+                    end
+                    Main -> Main: Continue validation loop (retry)
+                else Option 1 or 4
+                    Main -> Main: Continue/break validation loop
+                end
+            else No overlaps
+                Timeline --> Main: validation_result = {valid: True}
+                Main -> Main: Break validation loop
+            end
+            deactivate Timeline
+            deactivate Main
+        end
+
+        Main -> User: Prompt: "Text for voice-over"
+        User --> Main: text = "Welcome to my video"
+
+        ' Language Selection
+        Main -> User: Interactive list (inquirer):\nSelect language (arrow keys):\n• English (en)\n• Hindi (hi)\n• Tamil (ta)\n• Telugu (te)\n• Kannada (kn)\n• Malayalam (ml)\n• French (fr)\n• Spanish (es)\n• German (de)\n• Korean (ko)\n• Japanese (ja)\n• Chinese (zh)\n• Arabic (ar)\n• Russian (ru)\n• Portuguese (pt)\n• Italian (it)
+        User --> Main: language = "en"
+        Main -> User: ✓ Selected language: en
+
+        ' Voice Selection with Interactive Preview
+        Main -> VoiceSelector: select_voice_interactive(tts_service, language)
+        activate VoiceSelector
+
+        VoiceSelector -> User: Fetching available voices for en...
+        VoiceSelector -> TTS: get_available_voices("en")
+        activate TTS
+
+        TTS -> EdgeTTS: Try: VoicesManager.create()
+        activate EdgeTTS
+        alt New API (edge-tts >= 6.0.0)
+            EdgeTTS --> TTS: voices list via VoicesManager
+        else Old API (edge-tts < 6.0.0)
+            EdgeTTS --> TTS: voices list via list_voices()
+        end
+        deactivate EdgeTTS
+
+        TTS -> TTS: Filter voices by language\nExtract: name, short_name,\ngender, locale
+        TTS --> VoiceSelector: voices = [\n{name, short_name, gender, locale}, ...]
+        deactivate TTS
+
+        VoiceSelector -> User: Display voice table:\n# | Voice Name | Gender | Locale\n1 | Ava Multilingual | Female | en-US\n2 | Andrew Multilingual | Male | en-US\n...\n\nTotal voices: 50
+
+        VoiceSelector -> User: Display instructions:\nHow to use:\n• Use ↑/↓ arrow keys to navigate\n• Press Enter to select\n• Choose 'Preview' to hear voice\n• Choose 'Select' to use voice
+
+        loop Voice Selection Loop
+            VoiceSelector -> User: Interactive list (inquirer):\nSelect voice for en\n(↑↓ to navigate, Enter to select)
+            User --> VoiceSelector: Select voice (e.g., voice_0)
+
+            loop Action Loop
+                VoiceSelector -> User: Voice: Ava Multilingual\nAction:\n• 🎧 Preview this voice\n• ✓ Select this voice\n• ← Back to list
+                User --> VoiceSelector: Select action
+
+                alt Action: Preview
+                    VoiceSelector -> User: 🎧 Generating preview for: Ava...
+
+                    VoiceSelector -> VoiceSelector: Get preview text for language:\n"Hello! This is a voice preview.\nHow do you like this voice?"
+
+                    VoiceSelector -> VoiceSelector: Check cache:\n/tmp/voice_previews/{voice}.mp3
+
+                    alt Cache miss or corrupt
+                        VoiceSelector -> EdgeTTS: Communicate(\ntext=preview_text,\nvoice=short_name)
+                        activate EdgeTTS
+                        EdgeTTS -> EdgeTTS: Generate audio via\nMicrosoft Edge TTS API
+                        EdgeTTS --> VoiceSelector: Audio data
+                        deactivate EdgeTTS
+
+                        VoiceSelector -> FileSystem: Save to cache:\n/tmp/voice_previews/{voice}.mp3
+                    end
+
+                    alt Audio available (pygame initialized)
+                        VoiceSelector -> VoiceSelector: pygame.mixer.music.load(audio_path)
+                        VoiceSelector -> VoiceSelector: pygame.mixer.music.play()
+                        VoiceSelector -> User: ▶ Playing preview...
+                        VoiceSelector -> VoiceSelector: Wait for playback to finish
+                        VoiceSelector -> User: ✓ Preview complete
+                    else Audio not available
+                        VoiceSelector -> User: ⚠ Audio preview not available
+                    end
+
+                    VoiceSelector -> VoiceSelector: Loop back to action menu
+
+                else Action: Select
+                    VoiceSelector -> User: ✓ Selected voice: Ava Multilingual
+                    VoiceSelector --> Main: voice = "en-US-AvaMultilingualNeural"
+                    VoiceSelector -> VoiceSelector: Break loops
+                else Action: Back
+                    VoiceSelector -> VoiceSelector: Break action loop,\nreturn to voice list
+                end
+            end
+        end
+        deactivate VoiceSelector
+
+        ' Voice parameters
+        Main -> User: Prompt: "Rate (e.g., +10%, -10%)"
+        User --> Main: rate = "+0%"
+
+        Main -> User: Prompt: "Volume (e.g., +10%, -10%)"
+        User --> Main: volume = "+0%"
+
+        Main -> User: Prompt: "Pitch (e.g., +5Hz, -5Hz)"
+        User --> Main: pitch = "+0Hz"
+
+        ' Subtitle Styling
+        Main -> User: Confirm: "Configure subtitle styling?"
+        User --> Main: configure = False
+
+        alt User wants custom styling
+            Main -> User: Display: Subtitle Styling Options
+            Main -> User: Confirm: "Use custom font?"
+            User --> Main: use_custom = True
+
+            Main -> User: Prompt: "Enter Google Font URL or name\nExample: https://fonts.googleapis.com/css2?family=Roboto\nOr just: Roboto"
+            User --> Main: font_input = "Momo Signature"
+
+            Main -> GoogleFonts: get_font_from_input_with_install(font_input)
+            activate GoogleFonts
+            GoogleFonts -> GoogleFonts: parse_google_font_url(font_input)
+            GoogleFonts -> GoogleFonts: If URL: extract family parameter\nElse: use as font name
+            GoogleFonts -> FontMgr: ensure_font_available(font_name)
+            activate FontMgr
+
+            FontMgr -> FontMgr: is_font_installed(font_name)?
+            alt Font not installed
+                FontMgr -> User: Font not found. Downloading...
+                FontMgr -> FontMgr: download_google_font(font_name)
+                activate FontMgr
+
+                FontMgr -> FontMgr: Format URL:\nhttps://fonts.googleapis.com/css2?family=Momo+Signature
+                FontMgr -> FontMgr: Send GET request with User-Agent
+                activate FontMgr
+                FontMgr -> FontMgr: Parse CSS, extract font URLs:\nurl(https://fonts.gstatic.com/s/...)
+                deactivate FontMgr
+
+                loop For each font URL
+                    FontMgr -> FontMgr: Download font file (.ttf/.woff2)
+                    FontMgr -> FileSystem: Save to:\nstorage/fonts/Momo_Signature/*.ttf
+                end
+
+                FontMgr --> FontMgr: font_cache_dir
+                deactivate FontMgr
+
+                FontMgr -> FontMgr: get_system_font_dir()
+                activate FontMgr
+                FontMgr -> FontMgr: Determine platform:\nmacOS: ~/Library/Fonts\nLinux: ~/.local/share/fonts\nWindows: %LOCALAPPDATA%/Microsoft/Windows/Fonts
+                FontMgr --> FontMgr: system_font_dir
+                deactivate FontMgr
+
+                loop For each font file in cache
+                    FontMgr -> FileSystem: Copy font to system_font_dir
+                end
+
+                FontMgr -> FontMgr: _update_font_cache()
+                activate FontMgr
+                alt Linux
+                    FontMgr -> FontMgr: Execute: fc-cache -f -v
+                else macOS/Windows
+                    FontMgr -> FontMgr: Auto-updates (no action needed)
+                end
+                deactivate FontMgr
+
+                FontMgr -> User: ✓ Font installed successfully
+            end
+
+            FontMgr --> GoogleFonts: font_name
+            deactivate FontMgr
+            GoogleFonts --> Main: font = "Momo Signature"
+            deactivate GoogleFonts
+
+            Main -> User: ✓ Using font: Momo Signature
+
+            Main -> User: Prompt: "Font size" (default: 20)
+            User --> Main: size = 24
+
+            Main -> User: Display: Text Color:\n1. White (default)\n2. Yellow\n3. Cyan\n4. Custom hex
+            User --> Main: color_choice = 1
+            Main -> Main: color = "&H00FFFFFF" (ASS format)
+
+            Main -> User: Prompt: "Position from bottom (pixels)"
+            User --> Main: position = 30
+
+            Main -> User: Confirm: "Enable border/outline?"
+            User --> Main: border_enabled = True
+
+            Main -> User: Display: Border Style:\n1. Outline with shadow (default)\n2. Outline only (no shadow)\n3. Opaque box background
+            User --> Main: border_style_choice = 1
+            Main -> Main: border_style = 1
+
+            Main -> User: Prompt: "Outline/border width (pixels)"
+            User --> Main: outline_width = 2.0
+
+            Main -> User: Display: Outline/Border Color:\n1. Black (default)\n2. White\n3. Dark gray\n4. Custom hex
+            User --> Main: outline_color_choice = 1
+            Main -> Main: outline_color = "&H00000000"
+
+            Main -> User: Prompt: "Shadow distance (pixels, 0=no shadow)"
+            User --> Main: shadow = 1.0
+
+            Main -> Main: styling = {font, size, color, position,\nborder_enabled, border_style,\noutline_width, outline_color, shadow}
+        else User wants default styling
+            Main -> Subtitle: Get default font for language
+            activate Subtitle
+            Subtitle -> Subtitle: LANGUAGE_FONTS lookup:\nen → Roboto\nhi → Noto Sans Devanagari\nta → Noto Sans Tamil\n(etc.)
+            Subtitle --> Main: default_font
+            deactivate Subtitle
+
+            Main -> Main: styling = {\nfont: default_font,\nsize: 20,\ncolor: "&H00FFFFFF",\nposition: 30,\nborder_enabled: True,\nborder_style: 1,\noutline_width: 2.0,\noutline_color: "&H00000000",\nshadow: 0.0\n}
+        end
+
+        ' Create Segment
+        Main -> Timeline: add_segment(\nstart=0.0, end=10.0,\ntext="Welcome to my video",\nvoice="en-US-AvaMultilingualNeural",\nlanguage="en", name="Intro")
+        activate Timeline
+
+        Timeline -> Segment: Create Segment instance
+        activate Segment
+        Segment -> Segment: Generate UUID for id
+        Segment -> Segment: Set all properties
+        Segment --> Timeline: Segment instance
+        deactivate Segment
+
+        Timeline -> Segment: validate()
+        activate Segment
+        Segment -> Segment: Check: end_time > start_time?
+        Segment -> Segment: Check: text not empty?
+        Segment -> Segment: Check: start_time >= 0?
+        Segment -> Segment: Check: language specified?
+        Segment --> Timeline: (is_valid=True, error=None)
+        deactivate Segment
+
+        Timeline -> Timeline: Check: end > video_duration?
+        Timeline -> Timeline: Append segment to segments list
+        Timeline -> Timeline: Sort segments by start_time
+        Timeline -> Logger: Log: Added segment
+        Timeline --> Main: Segment instance
+        deactivate Timeline
+
+        ' Set segment properties
+        Main -> Segment: Set rate, volume, pitch
+        Main -> Segment: Set subtitle styling:\nsubtitle_font, subtitle_size,\nsubtitle_color, subtitle_position,\nsubtitle_border_enabled,\nsubtitle_border_style,\nsubtitle_outline_width,\nsubtitle_outline_color,\nsubtitle_shadow
+
+        ' Save project
+        Main -> Project: save()
+        activate Project
+        Project -> Project: Update modified_at = datetime.now()
+        Project -> Project: Serialize to dict:\n- timeline.to_dict() includes\n  all segments with to_dict()
+        Project -> FileSystem: Write JSON to\nstorage/projects/MyProject/project.json
+        Project --> Main: Success
+        deactivate Project
+
+        Main -> User: ✓ Segment added: Intro\nTime: 0.00s - 10.00s (Duration: 10.00s)\nVoice: en-US-AvaMultilingualNeural\nSubtitle font: Momo Signature
+
+        ' Optional: Generate audio now
+        Main -> User: Confirm: "Generate voice-over audio now?"
+        User --> Main: generate_now = True
+
+        alt Generate audio now
+            Main -> Main: generate_segment_audio(segment)
+            activate Main
+
+            Main -> User: Status: Generating audio for 'Intro'...
+
+            Main -> TTS: generate_audio(\ntext="Welcome to my video",\nlanguage="en",\nvoice="en-US-AvaMultilingualNeural",\nproject_name="MyProject",\nsegment_name="Intro",\nrate="+0%", volume="+0%", pitch="+0Hz")
+            activate TTS
+
+            ' Cache key generation
+            TTS -> TTS: _generate_cache_key(\ntext, voice, rate, volume, pitch)
+            activate TTS
+            TTS -> TTS: content = f"{text}_{voice}_{rate}_{volume}_{pitch}"
+            TTS -> TTS: cache_key = hashlib.md5(content).hexdigest()
+            TTS --> TTS: cache_key = "a1b2c3d4..."
+            deactivate TTS
+
+            ' Check cache
+            TTS -> TTS: find_cached_files(cache_key)
+            activate TTS
+            TTS -> TTS: Check if cache_key in cache_mapping dict
+            alt Cache hit and files exist
+                TTS -> FileSystem: Check if cached audio/subtitle exist
+                FileSystem --> TTS: Files exist
+                TTS --> TTS: (audio_path, subtitle_path)
+                TTS -> Logger: Log: Using cached audio
+                TTS --> Main: (cached_audio_path, cached_subtitle_path)
+            else Cache miss or files don't exist
+                TTS --> TTS: (None, None)
+                deactivate TTS
+
+                ' Generate new audio
+                TTS -> TTS: Create file paths:\naudio_path = storage/projects/MyProject/en/Intro.mp3\nsubtitle_path = storage/projects/MyProject/en/Intro.srt
+
+                TTS -> FileSystem: Create directory:\nstorage/projects/MyProject/en/
+
+                TTS -> TTS: _generate_audio_and_subtitle(\ntext, voice, rate, volume, pitch,\naudio_path, subtitle_path)
+                activate TTS
+
+                TTS -> EdgeTTS: communicate = Communicate(\ntext="Welcome to my video",\nvoice="en-US-AvaMultilingualNeural",\nrate="+0%", volume="+0%", pitch="+0Hz")
+                activate EdgeTTS
+                EdgeTTS -> EdgeTTS: Connect to Microsoft Edge TTS API
+                EdgeTTS --> TTS: communicate object
+                deactivate EdgeTTS
+
+                TTS -> EdgeTTS: submaker = SubMaker()
+                activate EdgeTTS
+                EdgeTTS --> TTS: submaker instance
+                deactivate EdgeTTS
+
+                TTS -> TTS: audio_data = bytearray()
+
+                loop Stream chunks (with 30s timeout)
+                    TTS -> EdgeTTS: async for chunk in communicate.stream()
+                    activate EdgeTTS
+                    EdgeTTS --> TTS: chunk
+                    deactivate EdgeTTS
+
+                    alt chunk type = "audio"
+                        TTS -> TTS: audio_data.extend(chunk["data"])
+                    else chunk type = "WordBoundary"
+                        TTS -> EdgeTTS: submaker.feed(chunk)
+                        activate EdgeTTS
+                        EdgeTTS -> EdgeTTS: Track word timing for subtitles
+                        deactivate EdgeTTS
+                    end
+                end
+
+                TTS -> FileSystem: Write audio file:\nwith open(audio_path, "wb") as f:\n    f.write(audio_data)
+
+                TTS -> EdgeTTS: subtitle_content = submaker.get_srt()
+                activate EdgeTTS
+                EdgeTTS --> TTS: SRT formatted subtitles
+                deactivate EdgeTTS
+
+                alt subtitle_content empty or None
+                    TTS -> TTS: Generate accurate subtitles\nbased on audio duration
+                    activate TTS
+                    TTS -> FFprobeBin: Get audio duration:\nffprobe -v quiet -show_entries\nformat=duration -of csv=p=0 audio_path
+                    activate FFprobeBin
+                    FFprobeBin --> TTS: audio_duration = 8.5s
+                    deactivate FFprobeBin
+
+                    TTS -> TTS: Split text into chunks (~45 chars each):\nwords = text.split()\nChunk 1: "Welcome to my video"
+
+                    TTS -> TTS: Calculate timing:\nchunk_duration = audio_duration / num_chunks\nFor each chunk:\n    start = i * chunk_duration\n    end = (i+1) * chunk_duration
+
+                    TTS -> TTS: Generate SRT:\n1\n00:00:00,000 --> 00:00:08,500\nWelcome to my video
+
+                    TTS --> TTS: subtitle_content
+                    deactivate TTS
+                end
+
+                TTS -> FileSystem: Write subtitle file:\nwith open(subtitle_path, "w") as f:\n    f.write(subtitle_content)
+
+                TTS -> Logger: Log: Generated audio and subtitle files
+                TTS --> TTS: Success
+                deactivate TTS
+
+                ' Store in cache
+                TTS -> TTS: store_cache_mapping(\ncache_key, audio_path, subtitle_path)
+                activate TTS
+                TTS -> TTS: cache_mapping[cache_key] = {\n"audio_path": audio_path,\n"subtitle_path": subtitle_path\n}
+                TTS -> FileSystem: Save cache to\nstorage/cache/tts_cache.json
+                TTS --> TTS: Cache updated
+                deactivate TTS
+
+                TTS -> Logger: Log: Successfully generated audio
+                TTS --> Main: (audio_path, subtitle_path)
+            end
+            deactivate TTS
+
+            Main -> Segment: Set audio_path and subtitle_path
+            Main -> User: ✓ Audio generated: Intro.mp3
+
+            ' Validate audio duration
+            Main -> Main: _validate_audio_duration(segment)
+            activate Main
+
+            Main -> FFmpeg: get_media_duration(audio_path)
+            activate FFmpeg
+            FFmpeg -> FFprobeBin: Execute: ffprobe -v quiet\n-show_entries format=duration\n-of csv=p=0 audio_path
+            activate FFprobeBin
+            FFprobeBin --> FFmpeg: audio_duration = 8.2s
+            deactivate FFprobeBin
+            FFmpeg --> Main: 8.2
+            deactivate FFmpeg
+
+            Main -> Main: segment_duration = end_time - start_time = 10.0s
+            Main -> User: Display:\nSegment duration: 10.00s\nAudio duration: 8.20s
+
+            alt audio_duration > segment_duration
+                Main -> User: ⚠ Audio duration (8.2s) exceeds segment duration (10.0s)
+                Main -> Timeline: Check for following segments
+                activate Timeline
+                Timeline -> Timeline: Filter segments where\nstart_time >= current_segment.end_time
+                Timeline --> Main: following_segments list
+                deactivate Timeline
+
+                alt No following segments
+                    Main -> User: No following segments detected.
+                    Main -> User: Confirm: Extend segment to fit audio (8.2s)?
+                    User --> Main: extend = True
+
+                    Main -> Segment: old_end = segment.end_time\nsegment.end_time = segment.start_time + audio_duration
+                    Main -> Main: Check if new end > video_duration
+                    alt Exceeds video duration
+                        Main -> Segment: segment.end_time = min(video_duration,\nsegment.start_time + audio_duration)
+                        Main -> User: ⚠ Capping at video duration
+                    end
+                    Main -> User: ✓ Segment extended: 10.00s → {new_end}s
+                    Main -> Project: save()
+
+                else Following segments exist
+                    Main -> User: ⚠ {count} following segment(s) detected:\n• Segment2: 15s - 20s\n• Segment3: 25s - 30s
+
+                    Main -> User: Display options:\n1. Keep current (audio will be cut)\n2. Extend and adjust following segments\n3. Shorten audio by adjusting voice rate\n4. Edit segment manually
+                    User --> Main: option
+
+                    alt Option 1: Keep
+                        Main -> User: Audio will be cut during export
+                    else Option 2: Extend
+                        Main -> Main: Calculate space available\nand shift following segments
+                    else Option 3: Adjust rate
+                        Main -> Main: Calculate rate_adjustment =\n(segment_dur / audio_dur - 1) * 100
+                        Main -> User: Suggested rate: {rate_adjustment}%
+                        Main -> User: Prompt: "New rate"
+                        User --> Main: new_rate
+                        Main -> Segment: segment.rate = new_rate
+                        Main -> User: Please regenerate audio
+                    end
+                end
+            else audio_duration < segment_duration * 0.5
+                Main -> User: ℹ Audio much shorter than segment
+                Main -> User: Confirm: Shorten segment to fit audio?
+                alt User confirms
+                    Main -> Segment: segment.end_time = start_time + audio_duration
+                    Main -> Project: save()
+                end
+            end
+
+            deactivate Main
+
+            Main -> Project: save()
+        end
+
+    end
+end
+
+' ============================================================================
+' FLOW 6: EXPORT VIDEO
+' ============================================================================
+
+== FLOW 6: Export Video (Project Menu Option 6) ==
+
+alt User selects "6. Export Video"
+
+    Main -> User: Display: Export Video
+
+    ' Validate timeline
+    Main -> Timeline: validate_timeline()
+    activate Timeline
+    Timeline -> Timeline: errors = []
+
+    loop For each segment
+        Timeline -> Segment: validate()
+        activate Segment
+        Segment --> Timeline: (is_valid, error)
+        deactivate Segment
+        alt Invalid
+            Timeline -> Timeline: errors.append(f"Segment {name}: {error}")
+        end
+    end
+
+    Timeline -> Timeline: Check for overlaps:\ncheck_overlaps()
+    activate Timeline
+    loop For each pair of segments
+        Timeline -> Timeline: Check if overlaps
+        alt Overlaps
+            Timeline -> Timeline: errors.append(f"Segments '{seg1}' and '{seg2}' overlap")
+        end
+    end
+    Timeline --> Timeline: overlaps list
+    deactivate Timeline
+
+    loop For each segment
+        alt audio_path not exists
+            Timeline -> Timeline: errors.append(f"Audio missing for '{name}'")
+        end
+    end
+
+    Timeline --> Main: errors list
+    deactivate Timeline
+
+    alt Errors found
+        Main -> User: Display errors:\n• Segment X: invalid timing\n• Audio missing for Segment Y
+        Main -> User: Confirm: "Continue export anyway?"
+        User --> Main: continue = False
+        alt User cancels
+            Main -> Main: Return to project menu
+        end
+    end
+
+    ' Get export settings
+    Main -> User: Prompt: "Output file path"\n(default: MyProject_output.mp4)
+    User --> Main: output_path = "MyProject_output.mp4"
+
+    Main -> User: Display quality presets:\n1. Lossless (best quality, largest file)\n2. High (near-lossless)\n3. Balanced (good quality, smaller file)
+    User --> Main: quality_choice = "3"
+    Main -> Main: quality = "balanced"
+
+    Main -> User: Confirm: "Include subtitles?"
+    User --> Main: include_subtitles = True
+
+    Main -> User: Confirm: "Add background music?"
+    User --> Main: add_bgm = False
+
+    alt add_bgm = True
+        Main -> User: Prompt: "Background music file path"
+        User --> Main: background_music = "/path/to/music.mp3"
+        Main -> FileSystem: Check if exists
+        alt Not found
+            Main -> User: ⚠ Background music file not found
+            Main -> Main: background_music = None
+        end
+    end
+
+    Main -> User: Display: Starting export...
+
+    Main -> Export: Create ExportPipeline(project)
+    activate Export
+
+    Export -> Export: Initialize temp_dir = storage/temp/
+
+    Export -> Export: export(\noutput_path="MyProject_output.mp4",\nquality="balanced",\ninclude_subtitles=True,\nbackground_music_path=None,\nprogress_callback=callback)
+    activate Export
+
+    ' Step 0: Ensure fonts available
+    alt include_subtitles = True
+        Export -> User: Progress: Checking font availability... (0%)
+
+        Export -> Export: _ensure_fonts_available()
+        activate Export
+        Export -> Export: Collect unique fonts from all segments
+        Export -> Export: required_fonts = {"Momo Signature", "Roboto", ...}
+
+        loop For each font
+            Export -> FontMgr: ensure_font_available(font_name)
+            activate FontMgr
+            FontMgr -> FontMgr: Check if installed
+            alt Not installed
+                FontMgr -> FontMgr: Download and install
+                ' (Already detailed in Add Segment flow)
+            end
+            FontMgr --> Export: Success/Warning
+            deactivate FontMgr
+        end
+
+        Export --> Export: Fonts ready
+        deactivate Export
+    end
+
+    ' Step 1: Generate all TTS audio
+    Export -> User: Progress: Generating audio for segments... (5%)
+
+    Export -> Export: _generate_all_audio(progress_callback)
+    activate Export
+
+    loop For each segment in timeline.segments
+        alt audio_path exists and file exists
+            Export -> Logger: Log: Using cached audio for segment
+        else Need to generate
+            Export -> Logger: Log: Generating audio for segment
+
+            Export -> TTS: generate_audio(\ntext=segment.text,\nlanguage=segment.language,\nvoice=segment.voice_id,\nproject_name=project.name,\nsegment_name=segment.name,\nrate=segment.rate,\nvolume=segment.volume,\npitch=segment.pitch)
+            ' (TTS flow already detailed above)
+            TTS --> Export: (audio_path, subtitle_path)
+
+            Export -> Segment: Set audio_path, subtitle_path
+            Export -> Logger: Log: Generated audio
+        end
+
+        Export -> User: Progress: Generated audio {i+1}/{total} ({percent}%)
+    end
+
+    Export --> Export: All audio generated
+    deactivate Export
+
+    ' Step 2: Process segments
+    Export -> User: Progress: Processing video segments... (30%)
+
+    Export -> Export: _process_segments(\ninclude_subtitles, quality, progress_callback)
+    activate Export
+
+    Export -> FFmpeg: get_media_duration(project.video_path)
+    FFmpeg --> Export: video_duration = 120.5s
+
+    Export -> Export: _validate_audio_lengths(video_duration)
+    activate Export
+    Export -> Export: Sort segments by start_time
+
+    loop For each segment
+        alt audio_path exists
+            Export -> FFmpeg: get_media_duration(segment.audio_path)
+            FFmpeg --> Export: audio_duration
+
+            Export -> Export: segment_duration = end - start
+
+            alt audio_duration > segment_duration + 1.0
+                Export -> Export: Calculate new_end_time = start + audio_duration
+
+                Export -> Export: Determine max_allowed_end:\n- If last segment: video_duration\n- Else: next_segment.start_time
+
+                alt new_end_time <= max_allowed_end
+                    Export -> Segment: Auto-extend:\nold_end = segment.end_time\nsegment.end_time = new_end_time
+                    Export -> Logger: Warning: Audio length mismatch\nℹ Auto-extended segment
+                    Export -> Project: save()
+                else Cannot extend
+                    Export -> Logger: Warning: Cannot extend,\naudio will be TRUNCATED
+                end
+            end
+        end
+    end
+    Export --> Export: Validation complete
+    deactivate Export
+
+    Export -> Export: all_parts = []
+    Export -> Export: current_time = 0.0
+    Export -> Export: sorted_segments = sort by start_time
+
+    loop For each segment (i=0, 1, 2, ...)
+
+        ' Part BEFORE segment (gap)
+        alt current_time < segment.start_time
+            Export -> Logger: Log: Extracting pre-segment part:\n{current_time}s - {segment.start_time}s
+
+            Export -> Export: part_path = temp/part_before_{i}.mp4
+
+            Export -> FFmpeg: extract_video_segment(\nvideo_path=project.video_path,\nstart_time=current_time,\nend_time=segment.start_time,\noutput_path=part_path,\nre_encode=True)
+            activate FFmpeg
+
+            FFmpeg -> FFmpegBin: Execute command:\nffmpeg -ss {start} -i {video}\n-t {duration}\n-c:v libx264 -c:a aac\n-preset medium -crf 23\n-pix_fmt yuv420p\n-y {output}
+            activate FFmpegBin
+            FFmpegBin -> FFmpegBin: Extract video segment\nRe-encode for concatenation compatibility
+            FFmpegBin --> FFmpeg: Success, file created
+            deactivate FFmpegBin
+
+            FFmpeg -> Logger: Log: Extracted segment
+            FFmpeg --> Export: Success
+            deactivate FFmpeg
+
+            Export -> Export: all_parts.append(part_path)
+        end
+
+        ' Process the SEGMENT with audio and subtitles
+        Export -> Logger: Log: Processing segment: {segment.name}
+
+        Export -> Export: segment_video_path = temp/segment_{i}_video.mp4
+
+        ' Extract segment video (no re-encode yet)
+        Export -> FFmpeg: extract_video_segment(\nvideo_path=project.video_path,\nstart_time=segment.start_time,\nend_time=segment.end_time,\noutput_path=segment_video_path,\nre_encode=False)
+        activate FFmpeg
+
+        FFmpeg -> FFmpegBin: Execute:\nffmpeg -ss {start} -i {video}\n-t {duration} -c copy\n-y {output}
+        activate FFmpegBin
+        FFmpegBin -> FFmpegBin: Fast stream copy (no re-encoding)
+        FFmpegBin --> FFmpeg: Success
+        deactivate FFmpegBin
+
+        FFmpeg --> Export: Success
+        deactivate FFmpeg
+
+        ' Prepare subtitle file
+        Export -> Export: subtitle_path = None
+
+        alt include_subtitles AND segment.subtitle_enabled AND segment.subtitle_path exists
+            Export -> Export: ass_path = subtitle_path.replace('.srt', '.ass')
+
+            Export -> Export: _get_subtitle_style(segment)
+            activate Export
+            Export -> Subtitle: get_default_style_for_language(segment.language)
+            activate Subtitle
+            Subtitle -> Subtitle: Get language-specific font
+            Subtitle -> Subtitle: Build default style dict:\nfontname, fontsize, primarycolour,\noutlinecolour, backcolour, bold,\nitalic, borderstyle, outline,\nshadow, alignment, margins
+            Subtitle --> Export: style dict
+            deactivate Subtitle
+
+            Export -> Export: Override with segment-specific:\nstyle['fontname'] = segment.subtitle_font\nstyle['fontsize'] = segment.subtitle_size\nstyle['primarycolour'] = segment.subtitle_color\nstyle['marginv'] = segment.subtitle_position
+
+            alt segment.subtitle_border_enabled
+                Export -> Export: style['borderstyle'] = segment.subtitle_border_style\nstyle['outline'] = segment.subtitle_outline_width\nstyle['outlinecolour'] = segment.subtitle_outline_color\nstyle['shadow'] = segment.subtitle_shadow
+            else No border
+                Export -> Export: style['borderstyle'] = '3'\nstyle['outline'] = '0'\nstyle['shadow'] = '0'\nstyle['backcolour'] = '&H80000000'
+            end
+
+            Export --> Export: style_options dict
+            deactivate Export
+
+            Export -> Subtitle: create_custom_ass_style(\nsegment.subtitle_path,\nass_path,\nstyle_options)
+            activate Subtitle
+
+            Subtitle -> Subtitle: convert_srt_to_ass(srt_path, ass_path)
+            activate Subtitle
+
+            Subtitle -> FileSystem: Read SRT file, validate content
+            alt Empty or corrupt
+                Subtitle -> Logger: Error: SRT file has no content
+                Subtitle --> Subtitle: Failed
+            else Valid SRT
+                Subtitle -> FFmpegBin: Execute:\nffmpeg -i {srt_path} -y {ass_path}
+                activate FFmpegBin
+                FFmpegBin -> FFmpegBin: Convert SRT to ASS format
+                FFmpegBin --> Subtitle: ASS file created
+                deactivate FFmpegBin
+
+                Subtitle -> Logger: Log: SRT to ASS conversion completed
+                Subtitle --> Subtitle: Success
+            end
+            deactivate Subtitle
+
+            Subtitle -> FileSystem: Read ASS file
+            Subtitle -> Subtitle: Build style line with custom options:\nStyle: Default,{fontname},{fontsize},\n{colors},{bold},{italic},{borderstyle},\n{outline},{shadow},{alignment},{margins}
+
+            Subtitle -> Subtitle: Find and replace style line in ASS content
+            Subtitle -> FileSystem: Write modified ASS file
+            Subtitle -> Logger: Log: Custom ASS styling applied
+            Subtitle --> Export: Success
+            deactivate Subtitle
+
+            Export -> Export: subtitle_path = ass_path
+        end
+
+        ' Process segment video with audio and subtitles
+        Export -> Export: processed_video_path = temp/segment_{i}_processed.mp4
+        Export -> Export: segment_duration = segment.end_time - segment.start_time
+
+        Export -> FFmpeg: process_segment_video(\nsegment_video_path,\nsegment.audio_path,\nsubtitle_path,\nprocessed_video_path,\nquality="balanced",\nexpected_duration=segment_duration)
+        activate FFmpeg
+
+        FFmpeg -> FFmpeg: Get durations
+        FFmpeg -> FFprobeBin: get_media_duration(video_path)
+        FFprobeBin --> FFmpeg: video_duration
+        FFmpeg -> FFprobeBin: get_media_duration(audio_path)
+        FFprobeBin --> FFmpeg: audio_duration
+
+        FFmpeg -> FFmpeg: target_duration = expected_duration\n(or video_duration if not provided)
+
+        FFmpeg -> Logger: Log: Video: {video_dur}s, Audio: {audio_dur}s,\nTarget: {target_dur}s
+
+        FFmpeg -> FFmpeg: has_video_audio = has_audio_stream(video_path)
+        activate FFmpeg
+        FFmpeg -> FFprobeBin: Execute:\nffprobe -v quiet -select_streams a\n-show_entries stream=codec_type\n-of csv=p=0 {video_path}
+        activate FFprobeBin
+        FFprobeBin --> FFmpeg: Result: "audio" or empty
+        deactivate FFprobeBin
+        FFmpeg --> FFmpeg: has_audio = True/False
+        deactivate FFmpeg
+
+        FFmpeg -> Config: Get CRF for quality preset
+        activate Config
+        Config -> Config: crf_map = {\n"lossless": 0,\n"high": 18,\n"balanced": 23\n}
+        Config --> FFmpeg: crf = 23
+        deactivate Config
+
+        ' Build audio filter
+        alt has_video_audio
+            FFmpeg -> FFmpeg: audio_filter = "[0:a][1:a]amix=inputs=2:\nduration=first:dropout_transition=0[aout]"
+            FFmpeg -> Logger: Log: Mixing video audio + TTS audio
+        else No video audio
+            FFmpeg -> FFmpeg: audio_filter = "[1:a]anull[aout]"
+            FFmpeg -> Logger: Log: Using only TTS audio
+        end
+
+        ' Build command
+        alt subtitle_path exists
+            FFmpeg -> FFmpeg: Escape ASS path for FFmpeg:\nass_path_escaped = subtitle_path\n.replace('\\\\', '\\\\\\\\')\n.replace(':', '\\\\:')
+
+            FFmpeg -> FFmpeg: Build command:\nffmpeg -i {video} -i {audio}\n-vf "ass={ass_path_escaped}"\n-filter_complex "{audio_filter}"\n-map 0:v -map [aout]\n-c:v libx264 -c:a aac\n-preset medium -crf {crf}\n-y {output}
+
+            FFmpeg -> Logger: Log: Processing with subtitles and voice-over
+        else No subtitles
+            FFmpeg -> FFmpeg: Build command:\nffmpeg -i {video} -i {audio}\n-filter_complex "{audio_filter}"\n-map 0:v -map [aout]\n-c:v libx264 -c:a aac\n-preset medium -crf {crf}\n-y {output}
+
+            FFmpeg -> Logger: Log: Processing with voice-over (no subtitles)
+        end
+
+        FFmpeg -> FFmpegBin: Execute command (timeout: 300s)
+        activate FFmpegBin
+        FFmpegBin -> FFmpegBin: Process video:\n1. Read video stream\n2. Read audio stream\n3. Apply subtitle filter (if ASS provided)\n4. Mix audio streams (amix filter)\n5. Encode video (libx264, crf={crf})\n6. Encode audio (aac)\n7. Mux into MP4 container
+        FFmpegBin --> FFmpeg: Success/Failure
+        deactivate FFmpegBin
+
+        alt Success
+            FFmpeg -> FFprobeBin: get_media_duration(output_path)
+            FFprobeBin --> FFmpeg: output_duration
+            FFmpeg -> FileSystem: Get file size
+            FFmpeg -> Logger: Log: Segment processed:\n{output_dur}s, {file_size}MB
+            FFmpeg --> Export: Success
+        else Failure
+            FFmpeg -> Logger: Error: Processing failed
+            FFmpeg --> Export: Failure
+        end
+        deactivate FFmpeg
+
+        alt Success
+            Export -> Export: all_parts.append(processed_video_path)
+            Export -> Logger: Log: Processed segment: {segment.name}
+        else Failure
+            Export -> Logger: Error: Failed to process segment
+        end
+
+        Export -> Export: current_time = segment.end_time
+        Export -> User: Progress: Processed segment {i+1}/{total} ({percent}%)
+    end
+
+    ' Part AFTER last segment
+    alt current_time < video_duration
+        Export -> Logger: Log: Extracting post-segment part:\n{current_time}s - {video_duration}s
+
+        Export -> Export: part_path = temp/part_after_last.mp4
+
+        Export -> FFmpeg: extract_video_segment(\nvideo_path, current_time,\nvideo_duration, part_path,\nre_encode=True)
+        ' (FFmpeg flow same as before)
+        FFmpeg --> Export: Success
+
+        Export -> Export: all_parts.append(part_path)
+    end
+
+    Export --> Export: all_parts list
+    deactivate Export
+
+    ' Step 3: Combine segments
+    Export -> User: Progress: Combining video segments... (70%)
+
+    Export -> Export: combined_path = temp/combined_MyProject.mp4
+
+    Export -> FFmpeg: concatenate_videos(all_parts, combined_path)
+    activate FFmpeg
+
+    FFmpeg -> FFmpeg: concat_file = temp/concat_list.txt
+
+    FFmpeg -> FileSystem: Write concat file:\nfile '/abs/path/to/part_before_0.mp4'\nfile '/abs/path/to/segment_0_processed.mp4'\nfile '/abs/path/to/part_before_1.mp4'\nfile '/abs/path/to/segment_1_processed.mp4'\n...
+
+    FFmpeg -> Logger: Log: Concatenating {count} videos
+
+    FFmpeg -> FFmpegBin: Execute:\nffmpeg -f concat -safe 0\n-i {concat_file}\n-c copy -y {output}
+    activate FFmpegBin
+    FFmpegBin -> FFmpegBin: Concatenate all video parts:\n1. Read concat file list\n2. Copy streams without re-encoding\n3. Mux into single MP4
+    FFmpegBin --> FFmpeg: Success
+    deactivate FFmpegBin
+
+    FFmpeg -> FFprobeBin: get_media_duration(output_path)
+    FFprobeBin --> FFmpeg: duration
+    FFmpeg -> FileSystem: Get file size
+    FFmpeg -> Logger: Log: Concatenation successful:\n{duration}s, {size}MB
+    FFmpeg --> Export: Success
+    deactivate FFmpeg
+
+    ' Step 4: Add background music (optional)
+    alt background_music_path exists
+        Export -> User: Progress: Adding background music... (90%)
+
+        Export -> FFmpeg: add_background_music(\ncombined_path,\nbackground_music_path,\noutput_path)
+        activate FFmpeg
+
+        FFmpeg -> FileSystem: Check if music file exists
+        alt Not exists
+            FFmpeg -> Logger: Error: Music file not found
+            FFmpeg --> Export: Failure
+        else Exists
+            FFmpeg -> FFprobeBin: get_media_duration(video_path)
+            FFprobeBin --> FFmpeg: video_duration
+            FFmpeg -> FFprobeBin: get_media_duration(music_path)
+            FFprobeBin --> FFmpeg: music_duration
+
+            FFmpeg -> Config: Get fade_duration, tts_boost, bgm_reduction
+            Config --> FFmpeg: fade=3.0s, boost=3dB, reduction=16dB
+
+            FFmpeg -> FFmpeg: has_audio = has_audio_stream(video_path)
+
+            FFmpeg -> FFmpeg: Calculate loops needed:\nif video_duration > music_duration:\n    loops = int(video_dur / music_dur) + 1\nelse:\n    loops = 0
+
+            alt has_audio AND loops > 0
+                FFmpeg -> FFmpeg: Build filter:\n[0:a]volume=+{boost}dB[boosted_video];\n[1:a]aloop=loop={loops}:size={samples},\nvolume=-{reduction}dB,\nafade=t=out:st={video_dur-fade}:d={fade},\natrim=duration={video_dur}[bg];\n[boosted_video][bg]amix=inputs=2:\nduration=first:dropout_transition=0[aout]
+            else has_audio AND no loops
+                FFmpeg -> FFmpeg: Build filter (no aloop)
+            else no audio AND loops > 0
+                FFmpeg -> FFmpeg: Build filter:\n[1:a]aloop=...,volume=...,\nafade=...,atrim=...[aout]
+            else no audio AND no loops
+                FFmpeg -> FFmpeg: Build filter (simple)
+            end
+
+            FFmpeg -> FFmpegBin: Execute:\nffmpeg -i {video} -i {music}\n-filter_complex "{filter}"\n-map 0:v -map [aout]\n-c:v copy -c:a aac\n-y {output}
+            activate FFmpegBin
+            FFmpegBin -> FFmpegBin: Process:\n1. Read video and music\n2. Loop music if needed\n3. Apply volume adjustments\n4. Apply fade out\n5. Trim to video length\n6. Mix audio streams\n7. Copy video, encode audio\n8. Mux to MP4
+            FFmpegBin --> FFmpeg: Success
+            deactivate FFmpegBin
+
+            FFmpeg -> FileSystem: Get file size
+            FFmpeg -> Logger: Log: Background music added: {size}MB
+            FFmpeg --> Export: Success
+        end
+        deactivate FFmpeg
+    else No background music
+        Export -> FileSystem: Copy combined_path to output_path\nshutil.copy(combined_path, output_path)
+    end
+
+    Export -> User: Progress: Export complete! (100%)
+
+    ' Cleanup temp files
+    Export -> Export: _cleanup_temp_files(all_parts, combined_path)
+    activate Export
+    loop For each temp file
+        Export -> FileSystem: Delete file: os.unlink(file_path)
+    end
+    Export -> Logger: Log: Cleanup completed
+    Export --> Export: Done
+    deactivate Export
+
+    Export -> Logger: Log: Export completed: {output_path}
+    Export --> Main: Success
+    deactivate Export
+
+    Main -> User: ✓ Export complete: MyProject_output.mp4
+
+    Main -> FileSystem: Get file size: Path(output_path).stat().st_size
+    FileSystem --> Main: size_bytes
+    Main -> Main: size_mb = size_bytes / 1024 / 1024
+    Main -> User: File size: {size_mb:.1f} MB
+
+    deactivate Export
+end
+
+' ============================================================================
+' FLOW 7: EDIT SEGMENT
+' ============================================================================
+
+== FLOW 7: Edit Segment (Project Menu Option 3) ==
+
+alt User selects "3. Edit Segment"
+
+    alt No segments exist
+        Main -> User: No segments to edit
+        Main -> Main: Return to project menu
+    else Segments exist
+        Main -> Main: list_segments()
+        Main -> User: Display segments table
+
+        Main -> User: Prompt: "Select segment number (0 to cancel)"
+        User --> Main: segment_num = 1
+
+        alt segment_num = 0 or invalid
+            Main -> Main: Return to project menu
+        else Valid segment
+            Main -> Timeline: Get segment = segments[segment_num - 1]
+            Timeline --> Main: segment
+
+            Main -> Main: Validate language code
+            alt Invalid language code
+                Main -> User: ⚠ Invalid language code: {segment.language}
+                Main -> Segment: segment.language = "en"
+                Main -> Project: save()
+            end
+
+            Main -> User: Display:\nEditing: {segment.name}\nCurrent language: {segment.language}\nNote: Text will be REPLACED (not appended)\nCurrent text: {segment.text[:150]}...
+
+            Main -> User: Display:\nEnter new text:\n- Press Enter on empty line to keep current\n- Type/paste and press Enter when done\n- Multiline paste automatically joined
+
+            Main -> Main: _get_multiline_input(segment.text)
+            activate Main
+            Main -> Main: lines = []
+            loop Multiline input loop
+                Main -> User: Read line: input()
+                User --> Main: line
+
+                alt First line empty
+                    Main -> Main: Return default_text (keep current)
+                    Main -> Main: Break loop
+                else Line empty and have lines
+                    Main -> Main: Break loop
+                else Non-empty line
+                    Main -> Main: lines.append(line)
+                end
+            end
+            Main -> Main: text = ' '.join(lines)
+            Main -> Main: text = ' '.join(text.split())\n(remove extra whitespace)
+            Main --> Main: sanitized text
+            deactivate Main
+
+            alt User cancelled (Ctrl+C)
+                Main -> User: Edit cancelled
+                Main -> Main: Return to project menu
+            else Text entered
+                Main -> Main: _sanitize_text(text)
+                activate Main
+                Main -> Main: Use regex to remove problematic chars:\nKeep only: \\w\\s\\.,!?\\-'";:()[]
+                Main -> Main: Remove multiple spaces
+                Main --> Main: sanitized_text
+                deactivate Main
+
+                alt Text changed after sanitization
+                    Main -> User: Some special characters were removed
+                end
+
+                Main -> User: Display preview:\nText to save ({len} chars):\n{text[:200]}...
+
+                Main -> User: Confirm: "Is this correct?"
+                User --> Main: confirmed = True
+
+                alt Not confirmed
+                    Main -> User: Edit cancelled
+                    Main -> Main: Return to project menu
+                else Confirmed
+                    Main -> User: Prompt: "Rate" (default: {current})
+                    User --> Main: rate
+
+                    Main -> User: Prompt: "Volume" (default: {current})
+                    User --> Main: volume
+
+                    Main -> User: Prompt: "Pitch" (default: {current})
+                    User --> Main: pitch
+
+                    Main -> User: Confirm: "Change language?"
+                    User --> Main: change_language = False
+
+                    alt change_language
+                        Main -> User: Interactive language selector (inquirer)
+                        User --> Main: new_language
+                        Main -> Segment: segment.language = new_language
+                        Main -> User: ✓ Language changed
+                    else Keep language
+                        Main -> Main: new_language = segment.language
+                    end
+
+                    Main -> User: Confirm: "Change voice?"
+                    User --> Main: change_voice = False
+
+                    alt change_voice
+                        Main -> VoiceSelector: select_voice_interactive(\ntts_service, new_language,\nsegment.voice_id)
+                        ' (Voice selection flow detailed earlier)
+                        VoiceSelector --> Main: voice (or None if cancelled)
+                        alt voice = None
+                            Main -> Main: voice = segment.voice_id (keep current)
+                        end
+                    else Keep voice
+                        Main -> Main: voice = segment.voice_id
+                    end
+
+                    Main -> User: Confirm: "Change subtitle styling?"
+                    User --> Main: change_styling = False
+
+                    alt change_styling
+                        Main -> Main: _get_subtitle_styling_options(\nsegment.subtitle_font)
+                        ' (Styling flow detailed in Add Segment)
+                        Main -> Main: styling dict
+                    else Keep styling
+                        Main -> Main: styling = None
+                    end
+
+                    ' Update segment
+                    Main -> Main: old_text = segment.text\nold_voice = segment.voice_id
+                    Main -> Segment: segment.text = text
+                    Main -> Segment: segment.rate = rate
+                    Main -> Segment: segment.volume = volume
+                    Main -> Segment: segment.pitch = pitch
+                    Main -> Segment: segment.voice_id = voice
+
+                    alt styling not None
+                        Main -> Segment: Update subtitle styling:\nsubtitle_font, subtitle_size,\nsubtitle_color, subtitle_position,\nsubtitle_border_enabled, etc.
+                        Main -> User: ✓ Subtitle styling updated
+                    end
+
+                    Main -> Project: save()
+                    Main -> User: ✓ Segment updated and saved
+
+                    Main -> Main: text_changed = (old_text != text)
+                    Main -> Main: voice_changed = (old_voice != voice)
+
+                    alt text_changed OR voice_changed
+                        alt text_changed
+                            Main -> User: Text changed - audio regeneration recommended
+                        end
+                        alt voice_changed
+                            Main -> User: Voice changed - audio regeneration recommended
+                        end
+
+                        Main -> User: Confirm: "Regenerate voice-over audio?"
+                        User --> Main: regenerate = True
+
+                        alt regenerate
+                            Main -> Main: generate_segment_audio(segment)
+                            ' (Audio generation flow detailed earlier)
+                            Main -> Project: save()
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+' ============================================================================
+' FLOW 8: DELETE SEGMENT
+' ============================================================================
+
+== FLOW 8: Delete Segment (Project Menu Option 4) ==
+
+alt User selects "4. Delete Segment"
+
+    alt No segments exist
+        Main -> User: No segments to delete
+    else Segments exist
+        Main -> Main: list_segments()
+        Main -> User: Display segments table
+
+        Main -> User: Prompt: "Select segment number (0 to cancel)"
+        User --> Main: segment_num
+
+        alt segment_num = 0 or invalid
+            Main -> Main: Return to project menu
+        else Valid segment
+            Main -> Timeline: Get segment = segments[segment_num - 1]
+            Timeline --> Main: segment
+
+            Main -> User: Confirm: "Delete segment '{segment.name}'?"
+            User --> Main: confirm = True
+
+            alt Confirmed
+                Main -> Timeline: remove_segment(segment.id)
+                activate Timeline
+                Timeline -> Timeline: Filter segments list:\nsegments = [s for s in segments\n             if s.id != segment_id]
+                Timeline -> Logger: Log: Removed segment
+                Timeline --> Main: Success
+                deactivate Timeline
+
+                Main -> User: ✓ Segment deleted
+            end
+        end
+    end
+end
+
+' ============================================================================
+' FLOW 9: GENERATE VOICE-OVERS
+' ============================================================================
+
+== FLOW 9: Generate Voice-Overs (Project Menu Option 5) ==
+
+alt User selects "5. Generate Voice-Overs"
+
+    Main -> User: Display: Generate Voice-Overs
+
+    alt No segments exist
+        Main -> User: No segments to process
+        Main -> Main: Return to project menu
+    else Segments exist
+        Main -> Main: Count segments needing audio:\nsegments_to_generate = [\n  seg for seg in segments\n  if not seg.audio_path or\n     not Path(seg.audio_path).exists()\n]
+
+        alt All segments have audio
+            Main -> User: All segments already have audio generated
+            Main -> Main: Return to project menu
+        else Need to generate
+            Main -> User: Segments needing audio: {count}
+
+            Main -> User: Confirm: "Generate voice-overs?"
+            User --> Main: confirm = True
+
+            alt Confirmed
+                Main -> Logger: Suppress console logs (for clean progress bar)
+                Main -> User: Display progress bar:\n[=====>    ] Generating audio... 50%
+
+                loop For each segment in segments_to_generate
+                    Main -> User: Update progress:\nGenerating: {segment.name}
+
+                    Main -> TTS: generate_audio(...)
+                    ' (TTS flow detailed earlier)
+                    TTS --> Main: (audio_path, subtitle_path)
+
+                    Main -> Segment: Set audio_path, subtitle_path
+
+                    Main -> User: Advance progress bar
+                end
+
+                Main -> Logger: Restore console logs
+                Main -> User: ✓ Voice-over generation complete
+            end
+        end
+    end
+end
+
+' ============================================================================
+' FLOW 10: PROJECT SETTINGS
+' ============================================================================
+
+== FLOW 10: Project Settings (Project Menu Option 7) ==
+
+alt User selects "7. Project Settings"
+
+    Main -> User: Display:\nProject Settings:\nExport Quality: {project.export_quality}\nInclude Subtitles: {project.include_subtitles}\nBackground Music: {project.background_music_path or "None"}
+
+    Main -> User: Confirm: "Edit settings?"
+    User --> Main: edit = True
+
+    alt Edit settings
+        Main -> User: Prompt: "Export quality"\n(choices: lossless, high, balanced)\n(default: {current})
+        User --> Main: quality
+        Main -> Project: project.export_quality = quality
+
+        Main -> User: Confirm: "Include subtitles"\n(default: {current})
+        User --> Main: include_subtitles
+        Main -> Project: project.include_subtitles = include_subtitles
+
+        Main -> User: Confirm: "Set background music?"
+        User --> Main: set_music = True
+
+        alt set_music
+            Main -> User: Prompt: "Background music file path"
+            User --> Main: music_path
+            Main -> FileSystem: Check if exists
+            alt Exists
+                Main -> Project: project.background_music_path = music_path
+            else Not found
+                Main -> User: File not found
+            end
+        end
+
+        Main -> User: ✓ Settings updated
+    end
+end
+
+' ============================================================================
+' FLOW 11: LIST PROJECTS
+' ============================================================================
+
+== FLOW 11: List All Projects (Main Menu Option 3) ==
+
+alt User selects "3. List All Projects"
+
+    Main -> Project: list_projects() [classmethod]
+    activate Project
+    Project -> FileSystem: Iterate:\nstorage/projects/*/project.json
+    loop For each project directory
+        Project -> FileSystem: Read project.json
+        FileSystem --> Project: JSON data
+        Project -> Project: Extract:\nname, video_path, created_at,\nmodified_at, segments_count
+        Project -> Project: Add to projects list
+    end
+    Project -> Project: Sort by modified_at (most recent first)
+    Project --> Main: projects list
+    deactivate Project
+
+    alt No projects
+        Main -> User: No projects found
+    else Projects exist
+        Main -> User: Display table:\nName | Video | Segments | Created | Modified
+        loop For each project
+            Main -> User: Display row:\n{name} | {video_file} | {count} |\n{created[:19]} | {modified[:19]}
+        end
+    end
+
+    Main -> Main: Return to main menu
+end
+
+' ============================================================================
+' FLOW 12: SAVE PROJECT
+' ============================================================================
+
+== FLOW 12: Save Project (Project Menu Option 8) ==
+
+alt User selects "8. Save Project"
+
+    Main -> Project: save()
+    activate Project
+
+    Project -> FileSystem: Create directory:\nstorage/projects/{project.name}/
+
+    Project -> Project: Update modified_at = datetime.now()
+
+    Project -> Project: Serialize to dict:\nproject_data = {\n  "name": name,\n  "video_path": video_path,\n  "timeline": timeline.to_dict(),\n  "created_at": created_at.isoformat(),\n  "modified_at": modified_at.isoformat(),\n  "background_music_path": bgm_path,\n  "export_quality": quality,\n  "include_subtitles": include_subs\n}
+
+    Project -> Timeline: to_dict()
+    activate Timeline
+    Timeline -> Timeline: timeline_dict = {\n  "video_path": video_path,\n  "video_duration": duration,\n  "video_info": info,\n  "segments": []\n}
+    loop For each segment
+        Timeline -> Segment: to_dict()
+        activate Segment
+        Segment -> Segment: Convert to dict using dataclasses.asdict():\n{\n  "id": id,\n  "name": name,\n  "start_time": start,\n  "end_time": end,\n  "text": text,\n  "language": lang,\n  "voice_id": voice,\n  "rate": rate, "volume": vol, "pitch": pitch,\n  "audio_path": audio,\n  "subtitle_path": subtitle,\n  "subtitle_enabled": enabled,\n  "subtitle_font": font,\n  "subtitle_size": size,\n  "subtitle_color": color,\n  "subtitle_position": position,\n  "subtitle_border_enabled": border_enabled,\n  "subtitle_border_style": border_style,\n  "subtitle_outline_width": outline_width,\n  "subtitle_outline_color": outline_color,\n  "subtitle_shadow": shadow,\n  "subtitle_shadow_color": shadow_color,\n  "sync_mode": sync_mode\n}
+        Segment --> Timeline: segment_dict
+        deactivate Segment
+        Timeline -> Timeline: Append to segments list
+    end
+    Timeline --> Project: timeline_dict
+    deactivate Timeline
+
+    Project -> FileSystem: Write JSON:\nwith open(project_file, 'w') as f:\n    json.dump(project_data, f, indent=2)
+
+    Project -> Logger: Log: Project saved: {name}
+    Project --> Main: Success
+    deactivate Project
+
+    Main -> User: ✓ Project saved
+end
+
+' ============================================================================
+' FLOW 13: EXIT
+' ============================================================================
+
+== FLOW 13: Exit Application (Main Menu Option 4) ==
+
+alt User selects "4. Exit"
+    Main -> User: Thank you for using TermiVoxed!
+    Main -> Main: Break main loop
+    Main -> Main: Exit application
+end
+
+' ============================================================================
+' TECHNICAL DETAILS SUMMARY
+' ============================================================================
+
+note over User, FileSystem
+  **TECHNICAL IMPLEMENTATION DETAILS**
+
+  **Architecture:**
+  - Main: main.py::ConsoleEditor (entry point, UI orchestration)
+  - Models: Project, Timeline, Segment (data models with persistence)
+  - Backend: TTSService, FFmpegUtils, SubtitleUtils (core services)
+  - Core: ExportPipeline (video export orchestration)
+  - Utils: VoiceSelector, FontManager, GoogleFonts, Logger
+
+  **Data Flow:**
+  1. User → Main (CLI input via Rich/Inquirer)
+  2. Main → Models (business logic, validation)
+  3. Models → Backend (TTS, video processing)
+  4. Backend → External (edge-tts API, FFmpeg binary)
+  5. External → FileSystem (audio, video, subtitle files)
+  6. FileSystem → Main → User (results, progress)
+
+  **Key Technologies:**
+  - **TTS**: edge-tts library (Microsoft Edge TTS API)
+  - **Video**: FFmpeg/FFprobe binaries (external tools)
+  - **UI**: Rich (console output), Inquirer (interactive selection)
+  - **Audio Preview**: Pygame mixer
+  - **Fonts**: Google Fonts API + system font installation
+  - **Persistence**: JSON files in storage/projects/
+  - **Caching**: TTS cache in storage/cache/tts_cache.json
+
+  **File Structure:**
+  storage/
+    ├── projects/{name}/
+    │   ├── project.json (metadata, timeline, segments)
+    │   └── {language}/
+    │       ├── {segment}.mp3 (TTS audio)
+    │       └── {segment}.srt (subtitles)
+    ├── cache/
+    │   └── tts_cache.json (cache_key → file_path mapping)
+    ├── temp/
+    │   ├── part_*.mp4 (video segments during export)
+    │   ├── segment_*_processed.mp4
+    │   ├── combined_*.mp4
+    │   └── concat_list.txt
+    ├── output/ (final exported videos)
+    └── fonts/ (downloaded Google Fonts cache)
+
+  /tmp/voice_previews/ (voice preview audio cache)
+
+  **Quality Presets (CRF values):**
+  - Lossless: CRF 0 (best quality, largest file)
+  - High: CRF 18 (near-lossless)
+  - Balanced: CRF 23 (good quality, reasonable size)
+
+  **Audio Processing:**
+  - TTS Volume Boost: +3dB (configurable)
+  - BGM Volume Reduction: -16dB (configurable)
+  - Fade Duration: 3.0s (configurable)
+  - Audio Mixing: FFmpeg amix filter (duration=first)
+
+  **Subtitle Styling (ASS format):**
+  - Font: Google Fonts (auto-downloaded)
+  - Size: pixels (default: 20)
+  - Color: ASS hex format (&H00BBGGRR)
+  - Position: marginv (pixels from bottom)
+  - Border: style (1=outline+box, 3=opaque box)
+  - Outline: width in pixels
+  - Shadow: distance in pixels
+
+  **Validation & Error Handling:**
+  - Segment timing: start >= 0, end > start, end <= video_duration
+  - Overlap detection: checks all segment pairs
+  - Audio length validation: auto-extend segments when possible
+  - Missing files: checks before export
+  - FFmpeg timeouts: 300s max per segment processing
+  - TTS retries: 3 attempts with exponential backoff
+
+  **Supported Languages (16):**
+  en, hi, ta, te, kn, ml, fr, es, de, ko, ja, zh, ar, ru, pt, it
+
+  Each with language-specific default fonts:
+  - Indian languages: Noto Sans {Devanagari|Tamil|Telugu|...}
+  - Western languages: Roboto
+  - Asian languages: Noto Sans {KR|JP|SC}
+end note
+
+@enduml

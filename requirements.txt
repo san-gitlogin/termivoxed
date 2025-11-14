@@ -1,4 +1,4 @@
-# Console Video Editor - Dependencies
+# TermiVoxed - Dependencies
 # Author: Santhosh T
 # Note: No version numbers specified - always uses latest versions
 
