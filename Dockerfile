@@ -4,7 +4,7 @@
 # Multi-stage build for optimized image size
 
 # Stage 1: Build stage
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Set working directory
 WORKDIR /app
@@ -35,7 +35,6 @@ WORKDIR /app
 # Install runtime dependencies (FFmpeg and system libraries)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    ffprobe \
     libsdl2-mixer-2.0-0 \
     libsdl2-2.0-0 \
     && rm -rf /var/lib/apt/lists/*
