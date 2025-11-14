@@ -59,7 +59,7 @@
    - Check version: `python3 --version` or `python --version`
    - Download: https://www.python.org/downloads/
 
-2. **FFmpeg and FFprobe**
+2. **FFmpeg** (includes ffprobe)
    - Check version: `ffmpeg -version`
    - Installation:
      - **macOS**: `brew install ffmpeg`
