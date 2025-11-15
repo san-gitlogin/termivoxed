@@ -12,29 +12,40 @@ from utils.logger import logger
 class Timeline:
     """Manages video timeline with segments"""
 
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, video_id: Optional[str] = None):
         self.video_path = video_path
+        self.video_id = video_id  # ID of the video this timeline belongs to
         self.video_duration = self._get_video_duration()
         self.video_info = self._get_video_info()
         self.segments: List[Segment] = []
 
     def _get_video_duration(self) -> float:
         """Get video duration using FFmpeg"""
+        from utils.logger import logger
+
         duration = FFmpegUtils.get_media_duration(self.video_path)
         if duration is None:
+            logger.error(f"Could not get duration for video: {self.video_path}")
+            logger.error("Check if FFmpeg is installed and video file is accessible")
             raise ValueError(f"Could not get duration for video: {self.video_path}")
         return duration
 
     def _get_video_info(self) -> dict:
         """Get video information"""
+        from utils.logger import logger
+
         info = FFmpegUtils.get_video_info(self.video_path)
         if info is None:
+            logger.error(f"Could not get video info for: {self.video_path}")
+            logger.error("FFmpegUtils.get_video_info() returned None")
             return {
-                'width': 0,
-                'height': 0,
-                'fps': 30.0,
+                'width': None,  # Changed from 0 to None so checks work properly
+                'height': None,
+                'fps': None,
                 'codec': 'unknown'
             }
+
+        logger.debug(f"Video info retrieved: {info}")
         return info
 
     def add_segment(
@@ -54,7 +65,8 @@ class Timeline:
             end_time=end,
             text=text,
             voice_id=voice,
-            language=language
+            language=language,
+            video_id=self.video_id  # Associate segment with video
         )
 
         # Validate segment
@@ -179,6 +191,7 @@ class Timeline:
         """Serialize timeline to dictionary"""
         return {
             "video_path": self.video_path,
+            "video_id": self.video_id,
             "video_duration": self.video_duration,
             "video_info": self.video_info,
             "segments": [seg.to_dict() for seg in self.segments]
@@ -187,7 +200,8 @@ class Timeline:
     @classmethod
     def from_dict(cls, data: dict) -> 'Timeline':
         """Deserialize timeline from dictionary"""
-        timeline = cls(data["video_path"])
+        video_id = data.get("video_id")
+        timeline = cls(data["video_path"], video_id=video_id)
         timeline.video_duration = data["video_duration"]
         timeline.video_info = data.get("video_info", timeline.video_info)
 

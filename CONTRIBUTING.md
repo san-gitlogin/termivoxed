@@ -54,6 +54,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 ### Your First Code Contribution
 
 Unsure where to begin? Look for issues labeled:
+
 - `good-first-issue` - Simple issues perfect for beginners
 - `help-wanted` - Issues where we'd appreciate community help
 
@@ -219,6 +220,7 @@ Fixes #67
 ```
 
 Examples:
+
 - `Add: Batch export functionality`
 - `Fix: Memory leak in audio processing`
 - `Update: Improve voice selection UX`
@@ -246,6 +248,7 @@ Always test your changes manually:
 ### Automated Testing (Future)
 
 We plan to add comprehensive tests. For now:
+
 - Focus on manual testing
 - Document test cases in your PR
 - Help us build the test suite!

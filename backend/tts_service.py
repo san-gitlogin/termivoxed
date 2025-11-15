@@ -78,29 +78,159 @@ class TTSService:
         content = f"{text}_{voice}_{rate}_{volume}_{pitch}"
         return hashlib.md5(content.encode()).hexdigest()
 
-    def _generate_accurate_subtitles(self, audio_path: str, text: str) -> str:
+    def _generate_word_timed_subtitles(
+        self,
+        word_timings: list,
+        text: str,
+        orientation: str = 'horizontal'
+    ) -> str:
         """
-        Generate accurate subtitles based on actual audio duration
-        Splits text into reasonable chunks and distributes timing evenly
+        Generate subtitles using actual word timing data from edge-tts
+        Splits text into chunks based on actual speech timing, not character count
+
+        Args:
+            word_timings: List of word timing dicts from edge-tts WordBoundary
+                         Each dict has: {'text': str, 'offset': int, 'duration': int}
+            text: Full text to subtitle
+            orientation: Video orientation for chunk size adjustment
+
+        Returns:
+            SRT formatted subtitle string with precise word-boundary timing
         """
-        import subprocess
+        if not word_timings:
+            logger.warning("No word timing data available, using fallback")
+            return self._generate_accurate_subtitles_fallback(text, 10.0, orientation)
 
-        # Get actual audio duration
-        try:
-            cmd = [
-                'ffprobe',
-                '-v', 'quiet',
-                '-show_entries', 'format=duration',
-                '-of', 'csv=p=0',
-                audio_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            audio_duration = float(result.stdout.strip())
-        except Exception as e:
-            logger.error(f"Could not get audio duration: {e}")
-            audio_duration = 10.0  # fallback
+        # Adjust chunk size based on video orientation
+        if orientation == 'horizontal':
+            # Horizontal: ~100 chars per chunk
+            target_chunk_size = 100
+            logger.info(f"📺 Horizontal video: Using word-timed sentence chunks (~{target_chunk_size} chars)")
+        else:
+            # Vertical: ~45 chars per chunk
+            target_chunk_size = 45
+            logger.info(f"📱 Vertical video: Using word-timed word chunks (~{target_chunk_size} chars)")
 
-        # Split text into chunks (approximately 40-50 chars per chunk for readability)
+        # Calculate total audio duration
+        total_duration = (word_timings[-1]['offset'] + word_timings[-1]['duration']) / 10_000_000.0
+
+        # For horizontal videos: split at reasonable intervals to avoid showing too much text
+        # For vertical videos: use smaller chunks for readability
+        if orientation == 'horizontal':
+            # Use fixed max duration for better readability (not too much text at once)
+            # 4 seconds is comfortable reading time for ~12-15 words
+            max_chunk_duration = 4.0  # Max 4 seconds per chunk
+            min_chunk_duration = 2.0  # Min 2 seconds per chunk for readability
+
+            logger.info(f"Using duration-based chunking: {total_duration:.1f}s audio, max chunk: {max_chunk_duration:.1f}s")
+        else:
+            # Vertical: shorter chunks for better mobile readability
+            max_chunk_duration = 3.0  # Max 3 seconds per chunk
+            min_chunk_duration = 1.5  # Min 1.5 seconds per chunk
+
+        # Group words into chunks based on DURATION, not character count
+        chunks = []
+        current_chunk_words = []
+        current_chunk_start = 0.0
+
+        # Natural break points for better readability
+        sentence_enders = {'.', '!', '?'}
+        pause_words = {',', ';', ':', '-', 'and', 'but', 'or', 'so', 'yet', 'then', 'also'}
+
+        for i, word_data in enumerate(word_timings):
+            word = word_data['text']
+            word_start = word_data['offset'] / 10_000_000.0
+            word_end = (word_data['offset'] + word_data['duration']) / 10_000_000.0
+
+            # Add word to current chunk
+            current_chunk_words.append(word_data)
+
+            # Calculate current chunk duration
+            if current_chunk_words:
+                chunk_duration = word_end - current_chunk_start
+            else:
+                chunk_duration = 0
+
+            # Check if we should break here
+            is_sentence_end = any(word.endswith(p) for p in sentence_enders)
+            is_pause_word = word.lower().strip('.,!?;:') in pause_words
+
+            # Look at next word timing (if exists) for natural pauses
+            has_pause_after = False
+            if i + 1 < len(word_timings):
+                next_word_start = word_timings[i + 1]['offset'] / 10_000_000.0
+                gap_to_next = next_word_start - word_end
+                has_pause_after = gap_to_next > 0.15  # 150ms+ gap indicates natural pause
+
+            # Decision: Break chunk if:
+            # 1. We hit target duration AND there's a sentence end
+            # 2. We hit target duration AND there's a natural pause/break word
+            # 3. We exceed max duration (forced break)
+            # 4. Last word (always close the chunk)
+            should_break = (
+                (chunk_duration >= max_chunk_duration * 0.7 and is_sentence_end) or
+                (chunk_duration >= max_chunk_duration * 0.8 and (is_pause_word or has_pause_after)) or
+                (chunk_duration >= max_chunk_duration * 1.1) or  # Forced break at 110% of max
+                (i == len(word_timings) - 1)  # Last word
+            )
+
+            # Also ensure minimum chunk duration (don't break too early)
+            if chunk_duration < min_chunk_duration and i < len(word_timings) - 1:
+                should_break = False
+
+            if should_break and len(current_chunk_words) > 0:
+                chunks.append(current_chunk_words)
+                current_chunk_words = []
+                # Next chunk starts at next word
+                if i + 1 < len(word_timings):
+                    current_chunk_start = word_timings[i + 1]['offset'] / 10_000_000.0
+
+        # If no chunks created, use all words as one chunk
+        if not chunks:
+            chunks = [word_timings]
+
+        # Generate SRT using actual word timing
+        srt_content = ""
+
+        for i, chunk_words in enumerate(chunks):
+            # Start time: offset of first word (convert from 100-nanosecond units to seconds)
+            start_time = chunk_words[0]['offset'] / 10_000_000.0
+
+            # End time: offset + duration of last word
+            last_word = chunk_words[-1]
+            end_time = (last_word['offset'] + last_word['duration']) / 10_000_000.0
+
+            # Chunk text
+            chunk_text = ' '.join([w['text'] for w in chunk_words])
+
+            # Format times as SRT
+            start_srt = self._format_srt_time(start_time)
+            end_srt = self._format_srt_time(end_time)
+
+            srt_content += f"{i + 1}\n"
+            srt_content += f"{start_srt} --> {end_srt}\n"
+            srt_content += f"{chunk_text}\n\n"
+
+        logger.info(f"Generated {len(chunks)} word-timed subtitle chunks (precise to milliseconds)")
+        return srt_content
+
+    def _generate_accurate_subtitles_fallback(
+        self,
+        text: str,
+        audio_duration: float,
+        orientation: str = 'horizontal'
+    ) -> str:
+        """
+        Fallback subtitle generation when word timing is not available
+        Uses even time distribution (less accurate but better than nothing)
+        """
+        # Adjust chunk size based on video orientation
+        if orientation == 'horizontal':
+            target_chunk_size = 100
+        else:
+            target_chunk_size = 45
+
+        # Split text into chunks
         words = text.split()
         chunks = []
         current_chunk = []
@@ -108,20 +238,17 @@ class TTSService:
 
         for word in words:
             current_chunk.append(word)
-            current_length += len(word) + 1  # +1 for space
+            current_length += len(word) + 1
 
-            # Create chunk if it's getting long (40-60 chars is readable)
-            if current_length >= 45:
+            if current_length >= target_chunk_size:
                 chunks.append(' '.join(current_chunk))
                 current_chunk = []
                 current_length = 0
 
-        # Add remaining words
         if current_chunk:
             chunks.append(' '.join(current_chunk))
 
-        # If text is short, use single chunk
-        if len(chunks) == 0:
+        if not chunks:
             chunks = [text]
 
         # Generate SRT with evenly distributed timing
@@ -130,9 +257,8 @@ class TTSService:
 
         for i, chunk in enumerate(chunks):
             start_time = i * chunk_duration
-            end_time = min((i + 1) * chunk_duration, audio_duration)
+            end_time = audio_duration if i == len(chunks) - 1 else (i + 1) * chunk_duration
 
-            # Format times as SRT format (HH:MM:SS,mmm)
             start_srt = self._format_srt_time(start_time)
             end_srt = self._format_srt_time(end_time)
 
@@ -140,15 +266,32 @@ class TTSService:
             srt_content += f"{start_srt} --> {end_srt}\n"
             srt_content += f"{chunk}\n\n"
 
-        logger.info(f"Generated {len(chunks)} subtitle chunks for {audio_duration:.2f}s audio")
+        logger.warning(f"Used fallback timing for {len(chunks)} chunks (less accurate)")
         return srt_content
 
     def _format_srt_time(self, seconds: float) -> str:
-        """Format seconds as SRT time format (HH:MM:SS,mmm)"""
+        """
+        Format seconds as SRT time format (HH:MM:SS,mmm) with millisecond precision
+        Uses proper rounding to avoid truncation errors
+        """
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)
-        millis = int((seconds % 1) * 1000)
+        # Use round() instead of int() to properly round milliseconds
+        # This prevents -1ms errors from truncation
+        millis = round((seconds % 1) * 1000)
+
+        # Handle edge case where rounding millis to 1000
+        if millis >= 1000:
+            millis = 0
+            secs += 1
+            if secs >= 60:
+                secs = 0
+                minutes += 1
+                if minutes >= 60:
+                    minutes = 0
+                    hours += 1
+
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
     def _get_best_voice(self, language: str, preferred_voice: Optional[str] = None) -> str:
@@ -224,11 +367,12 @@ class TTSService:
         volume: str,
         pitch: str,
         audio_path: str,
-        subtitle_path: str
+        subtitle_path: str,
+        orientation: str = 'horizontal'
     ):
         """
-        PROVEN: Generate both audio and subtitle files using edge-tts streaming
-        From: TTS_System_Documentation.md
+        Generate both audio and subtitle files using edge-tts streaming
+        Uses word-boundary timing data for precise subtitle synchronization
         """
         try:
             # Create communication object
@@ -240,8 +384,9 @@ class TTSService:
                 pitch=pitch
             )
 
-            # Create subtitle maker
+            # Create subtitle maker and collect word timing data
             submaker = edge_tts.SubMaker()
+            word_timings = []  # Collect word boundary data for precise timing
 
             # Stream audio and subtitle data
             audio_data = bytearray()
@@ -251,6 +396,12 @@ class TTSService:
                     if chunk["type"] == "audio":
                         audio_data.extend(chunk["data"])
                     elif chunk["type"] == "WordBoundary":
+                        # Collect word timing data
+                        word_timings.append({
+                            'text': chunk.get('text', ''),
+                            'offset': chunk.get('offset', 0),
+                            'duration': chunk.get('duration', 0)
+                        })
                         submaker.feed(chunk)
 
             # Add timeout for streaming
@@ -260,19 +411,38 @@ class TTSService:
             with open(audio_path, "wb") as audio_file:
                 audio_file.write(audio_data)
 
-            # Save subtitle file
-            subtitle_content = submaker.get_srt()
-
-            # Validate subtitle content
-            if not subtitle_content or subtitle_content.strip() == "":
-                logger.warning("No subtitle data generated from edge-tts - generating accurate subtitles")
-                # Generate accurate subtitles based on actual audio duration
-                subtitle_content = self._generate_accurate_subtitles(audio_path, text)
+            # Generate subtitles using word timing data for precise synchronization
+            if word_timings:
+                logger.info(f"📊 Collected {len(word_timings)} word timings from edge-tts")
+                # Use word-timed subtitles for all orientations
+                subtitle_content = self._generate_word_timed_subtitles(
+                    word_timings, text, orientation
+                )
+            else:
+                # Fallback: use edge-tts generated subtitles or time-based estimation
+                logger.warning("No word timing data available, using fallback")
+                if orientation == 'vertical':
+                    # For vertical, try edge-tts subtitles first
+                    subtitle_content = submaker.get_srt()
+                    if not subtitle_content or subtitle_content.strip() == "":
+                        # Get audio duration for fallback
+                        import subprocess
+                        cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio_path]
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        audio_duration = float(result.stdout.strip()) if result.returncode == 0 else 10.0
+                        subtitle_content = self._generate_accurate_subtitles_fallback(text, audio_duration, orientation)
+                else:
+                    # For horizontal, get audio duration and use fallback
+                    import subprocess
+                    cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio_path]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    audio_duration = float(result.stdout.strip()) if result.returncode == 0 else 10.0
+                    subtitle_content = self._generate_accurate_subtitles_fallback(text, audio_duration, orientation)
 
             with open(subtitle_path, "w", encoding="utf-8") as subtitle_file:
                 subtitle_file.write(subtitle_content)
 
-            logger.info(f"Generated audio and subtitle files")
+            logger.info(f"Generated audio and subtitle files with precise word-boundary timing")
 
         except asyncio.TimeoutError:
             raise Exception("Audio generation timed out after 30 seconds")
@@ -294,7 +464,8 @@ class TTSService:
         segment_name: Optional[str] = None,
         rate: str = "+0%",
         volume: str = "+0%",
-        pitch: str = "+0Hz"
+        pitch: str = "+0Hz",
+        orientation: str = 'horizontal'
     ) -> Tuple[str, Optional[str]]:
         """
         PROVEN: Generate audio file from text and return (audio_path, subtitle_path)
@@ -322,8 +493,9 @@ class TTSService:
             subtitle_path = str(project_dir / f"{file_name}.srt")
 
             # Generate audio and subtitle using streaming
+            # Pass orientation to adjust subtitle chunking based on video format
             await self._generate_audio_and_subtitle(
-                text, selected_voice, rate, volume, pitch, audio_path, subtitle_path
+                text, selected_voice, rate, volume, pitch, audio_path, subtitle_path, orientation
             )
 
             # Store cache mapping

@@ -12,7 +12,7 @@ A complete, production-ready console-based video editor that adds AI-generated v
 
 ```
 console_video_editor/
-├── main.py                          # ✅ CLI interface with Rich UI
+├── main.py                          # ✅ CLI interface with multi-video support
 ├── config.py                        # ✅ Configuration management
 ├── requirements.txt                 # ✅ Dependencies (latest versions)
 ├── setup.sh                         # ✅ Automated setup script
@@ -25,18 +25,21 @@ console_video_editor/
 │   └── tts_service.py              # edge-tts integration from docs
 │
 ├── models/                          # ✅ Data models
+│   ├── video.py                    # ✅ NEW: Video model with metadata
 │   ├── segment.py                  # Timeline segment model
-│   ├── timeline.py                 # Timeline management
-│   └── project.py                  # Project persistence
+│   ├── timeline.py                 # Timeline management per video
+│   └── project.py                  # ✅ UPDATED: Multi-video project persistence
 │
 ├── core/                            # ✅ Core logic
-│   └── export_pipeline.py          # Export orchestration
+│   ├── export_pipeline.py          # ✅ UPDATED: Multi-video export orchestration
+│   └── video_combiner.py           # ✅ NEW: Multi-video combination logic
 │
 ├── utils/                           # ✅ Utilities
+│   ├── file_picker.py              # ✅ NEW: Interactive multi-select file browser
 │   └── logger.py                   # Logging with loguru
 │
 └── storage/                         # ✅ File storage
-    ├── projects/                   # Project files
+    ├── projects/                   # Project files (v2 format with multi-video)
     ├── temp/                       # Temporary files
     ├── cache/                      # TTS cache
     └── output/                     # Export output
@@ -103,6 +106,21 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 - ✅ Error handling
 - ✅ Keyboard shortcuts
 
+### 7. **Multi-Video Support** ✅ **NEW**
+
+- ✅ Interactive file picker with multi-select (Space key)
+- ✅ Video model with metadata (resolution, orientation, aspect ratio, FPS, codec)
+- ✅ Project can contain multiple videos
+- ✅ Active video selection for editing
+- ✅ Video management (add, remove, reorder)
+- ✅ Compatibility checking (orientation, aspect ratio validation)
+- ✅ Three export modes:
+  - Export single/active video
+  - Export all videos individually
+  - Export combined video (concatenated in order)
+- ✅ Video combiner with smart scaling/normalization
+- ✅ Backwards compatibility (v1 single-video projects auto-migrate to v2)
+
 ---
 
 ## 🔧 Technologies Used
@@ -152,15 +170,32 @@ All TTS functionality uses **exact patterns** from `TTS_System_Documentation.md`
 
 ### Data Flow
 
+#### Single-Video Project
 ```
 Project
-  └─ Timeline
-      └─ Segments[]
-          ├─ text → TTS Service → audio.mp3
-          ├─ audio.mp3 → subtitle.srt → subtitle.ass
-          └─ [video segment + audio + subtitles] → FFmpeg
-                                                      ↓
-                                               Final Video
+  └─ Video (active)
+      └─ Timeline
+          └─ Segments[]
+              ├─ text → TTS Service → audio.mp3
+              ├─ audio.mp3 → subtitle.srt → subtitle.ass
+              └─ [video segment + audio + subtitles] → FFmpeg
+                                                          ↓
+                                                   Final Video
+```
+
+#### Multi-Video Project
+```
+Project
+  ├─ Video 1 (order: 1)
+  │   └─ Timeline → Segments[] → Processed Video 1
+  ├─ Video 2 (order: 2)
+  │   └─ Timeline → Segments[] → Processed Video 2
+  └─ Video 3 (order: 3)
+      └─ Timeline → Segments[] → Processed Video 3
+                                        ↓
+                        Video Combiner (compatibility check)
+                                        ↓
+                            Combined Final Video
 ```
 
 ---
@@ -263,6 +298,7 @@ cache_key = hashlib.md5(f"{text}_{voice}_{rate}_{volume}_{pitch}".encode()).hexd
 | Feature             | Status | Implementation                |
 | ------------------- | ------ | ----------------------------- |
 | Video Import        | ✅     | FFprobe metadata extraction   |
+| Multi-Video Select  | ✅     | Interactive file picker       |
 | Timeline Segments   | ✅     | Segment model with validation |
 | TTS Generation      | ✅     | edge-tts with streaming       |
 | Subtitle Generation | ✅     | Automatic SRT creation        |
@@ -271,9 +307,14 @@ cache_key = hashlib.md5(f"{text}_{voice}_{rate}_{volume}_{pitch}".encode()).hexd
 | Background Music    | ✅     | Looping with fade effects     |
 | Quality Presets     | ✅     | Lossless, High, Balanced      |
 | Caching             | ✅     | MD5-based file cache          |
-| Project Save/Load   | ✅     | JSON persistence              |
+| Project Save/Load   | ✅     | JSON persistence (v2 format)  |
 | Multi-language      | ✅     | 80+ languages via edge-tts    |
 | Progress Tracking   | ✅     | Rich progress bars            |
+| Video Management    | ✅     | Add, remove, reorder videos   |
+| Orientation Detect  | ✅     | Landscape/portrait/square     |
+| Compatibility Check | ✅     | Aspect ratio & orientation    |
+| Video Combination   | ✅     | Smart concat with normalization|
+| Export Options      | ✅     | Single, all, or combined      |
 
 ---
 

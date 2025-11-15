@@ -16,72 +16,94 @@ database "File System" as FileSystem
 Main -> User: Prompt: "Project name"
 User --> Main: project_name = "MyProject"
 
-Main -> User: Prompt: "Video file path (absolute path)"
-User --> Main: video_path = "/path/to/video.mp4"
+Main -> User: Display: "Select video files for your project..."
+Main -> Main: Call pick_video_files()
+activate Main #LightBlue
+note right: Uses interactive file picker\n- Browse folders with arrow keys\n- Multi-select with Space key\n- Confirm with Enter
 
-Main -> FileSystem: Check if file exists:\nPath(video_path).exists()
-activate FileSystem
-alt Video file not found
-    FileSystem --> Main: False
-    Main -> User: [red]Error: Video file not found[/red]
+Main -> User: Interactive File Picker:\n- Navigate folders (↑/↓/Enter)\n- Select videos (Space)\n- Confirm selection (Enter)
+User --> Main: video_paths = ["/path/video1.mp4", "/path/video2.mp4"]
+deactivate Main
+
+alt No videos selected
+    Main -> User: [yellow]No videos selected. Project creation cancelled.[/yellow]
     Main -> Main: Return to main menu
-else Video file exists
-    FileSystem --> Main: True
-    deactivate FileSystem
-
-    Main -> Project: Create Project(project_name, video_path)
+else Videos selected
+    Main -> Project: Create Project(project_name, video_paths)
     activate Project
 
-    Project -> Timeline: Initialize Timeline(video_path)
-    activate Timeline
+    loop For each video_path in video_paths
+        Project -> Project: add_video(video_path, order=idx)
+        activate Project #LightGreen
 
-    ' Get video duration
-    Timeline -> FFmpeg: get_media_duration(video_path)
-    activate FFmpeg
-    FFmpeg -> FFprobeBin: Execute command:\nffprobe -v quiet\n-show_entries format=duration\n-of csv=p=0\n{video_path}
-    activate FFprobeBin
-    FFprobeBin -> FFprobeBin: Parse video file\nExtract duration from container metadata
-    FFprobeBin --> FFmpeg: stdout: "120.5"
-    deactivate FFprobeBin
-    FFmpeg -> FFmpeg: Parse stdout:\nfloat(result.stdout.strip())
-    FFmpeg --> Timeline: duration = 120.5 seconds
-    deactivate FFmpeg
+        Project -> Timeline: Create Video.create(name, video_path, order)
+        activate Timeline
 
-    ' Get video info
-    Timeline -> FFmpeg: get_video_info(video_path)
-    activate FFmpeg
-    FFmpeg -> FFprobeBin: Execute command:\nffprobe -v quiet\n-select_streams v:0\n-show_entries stream=width,height,\npix_fmt,codec_name,r_frame_rate\n-of csv=p=0\n{video_path}
-    activate FFprobeBin
-    FFprobeBin -> FFprobeBin: Parse video stream metadata
-    FFprobeBin --> FFmpeg: stdout: "1920,1080,yuv420p,h264,30/1"
-    deactivate FFprobeBin
-    FFmpeg -> FFmpeg: Parse CSV output:\nwidth = int(info[0]) = 1920\nheight = int(info[1]) = 1080\npix_fmt = info[2] = "yuv420p"\ncodec = info[3] = "h264"\nfps = parse_fraction(info[4]) = 30.0
-    FFmpeg --> Timeline: video_info = {\n  'width': 1920,\n  'height': 1080,\n  'pix_fmt': 'yuv420p',\n  'codec': 'h264',\n  'fps': 30.0\n}
-    deactivate FFmpeg
+        ' Create Video instance with Timeline
+        Timeline -> Timeline: Create Timeline(video_path, video_id)
 
-    Timeline -> Timeline: Initialize empty segments list:\nsegments = []
-    Timeline --> Project: Timeline instance
-    deactivate Timeline
+        ' Get video duration
+        Timeline -> FFmpeg: get_media_duration(video_path)
+        activate FFmpeg
+        FFmpeg -> FFprobeBin: Execute: ffprobe -v quiet\n-show_entries format=duration\n-of csv=p=0 {video_path}
+        activate FFprobeBin
+        FFprobeBin --> FFmpeg: stdout: "120.5"
+        deactivate FFprobeBin
+        FFmpeg --> Timeline: duration = 120.5 seconds
+        deactivate FFmpeg
 
-    Project -> Project: Set metadata:\ncreated_at = datetime.now()\nmodified_at = datetime.now()\nbackground_music_path = None\nexport_quality = "balanced"\ninclude_subtitles = True
+        ' Get video info (resolution, fps, codec)
+        Timeline -> FFmpeg: get_video_info(video_path)
+        activate FFmpeg
+        FFmpeg -> FFprobeBin: Execute: ffprobe -v quiet\n-select_streams v:0\n-show_entries stream=width,height,\ncodec_name,r_frame_rate\n-of csv=p=0 {video_path}
+        activate FFprobeBin
+        FFprobeBin --> FFmpeg: "1920,1080,h264,30/1"
+        deactivate FFprobeBin
+        FFmpeg --> Timeline: video_info = {width: 1920, height: 1080,\ncodec: 'h264', fps: 30.0}
+        deactivate FFmpeg
 
-    Project --> Main: Project instance
+        Timeline -> Timeline: Calculate:\n- aspect_ratio = width/height = 1.778\n- orientation = 'horizontal' (AR > 1.1)
+        Timeline --> Project: Video instance with metadata
+        deactivate Timeline
+
+        Project -> Project: Add to self.videos[]\nSet as active if first video
+        deactivate Project
+    end
+
+    Project -> Project: Set metadata:\ncreated_at = datetime.now()\nmodified_at = datetime.now()\nexport_quality = "balanced"
+
+    Project --> Main: Project instance with multiple videos
     deactivate Project
 
     ' Display video info to user
-    Main -> User: Display video information:\n\n[green]✓ Video loaded successfully[/green]\n  Duration: 120.50s\n  Resolution: 1920x1080\n  FPS: 30.0\n  Codec: h264
+    Main -> User: Display:\n\n[green]✓ Project created with {N} video(s)[/green]\n\nTable showing:\n- Video names\n- Durations\n- Resolutions\n- Orientations (🖥/📱/⬜)
+
+    ' Check video compatibility for multi-video projects
+    alt Multiple videos selected (len > 1)
+        Main -> Project: check_video_compatibility()
+        activate Project
+        Project -> Project: Compare orientations,\naspect ratios between videos
+        alt Videos incompatible
+            Project --> Main: (False, warnings)
+            Main -> User: [yellow]⚠ Video Compatibility Warnings:[/yellow]\n• Incompatible orientations\n• Different aspect ratios
+        else Videos compatible
+            Project --> Main: (True, [])
+            Main -> User: [green]✓ All videos are compatible for combination[/green]
+        end
+        deactivate Project
+    end
 
     ' Save project
     Main -> Project: save()
     activate Project
     Project -> FileSystem: Create directory:\nmkdir -p storage/projects/MyProject/
-    Project -> Project: Serialize to JSON:\nproject_data = {\n  "name": "MyProject",\n  "video_path": "/path/to/video.mp4",\n  "timeline": {\n    "video_path": "/path/to/video.mp4",\n    "video_duration": 120.5,\n    "video_info": {...},\n    "segments": []\n  },\n  "created_at": "2025-11-14T08:00:00",\n  "modified_at": "2025-11-14T08:00:00",\n  "background_music_path": null,\n  "export_quality": "balanced",\n  "include_subtitles": true\n}
-    Project -> FileSystem: Write JSON to:\nstorage/projects/MyProject/project.json\nwith indent=2
+    Project -> Project: Serialize to JSON (v2 format):\nproject_data = {\n  "name": "MyProject",\n  "videos": [\n    {id, name, path, timeline, order,\n     duration, width, height, fps,\n     codec, aspect_ratio, orientation},\n    ...\n  ],\n  "active_video_id": "uuid",\n  "created_at": "2025-11-16...",\n  "version": 2\n}
+    Project -> FileSystem: Write JSON to:\nstorage/projects/MyProject/project.json
     FileSystem --> Project: File written
     Project --> Main: save successful (True)
     deactivate Project
 
-    Main -> User: [green]✓ Project created: MyProject[/green]
+    Main -> User: [green]✓ Project saved: MyProject[/green]
 
     Main -> Main: Navigate to project_menu()
 end
@@ -89,31 +111,42 @@ end
 note over User, FileSystem
   **Technical Details:**
 
-  **File Validation:**
-  - Path(video_path).exists() checks file existence
-  - No format validation at creation (done later)
+  **Interactive File Picker (NEW):**
+  - Uses utils/file_picker.py
+  - Two-stage process: Navigate → Multi-select
+  - Arrow keys for folder navigation
+  - Space key for video selection
+  - Returns list of absolute video paths
+
+  **Multi-Video Architecture (NEW):**
+  - Project contains list of Video instances
+  - Each Video has own Timeline and segments
+  - Videos have order attribute for sequencing
+  - active_video_id tracks which video is being edited
+
+  **Video Model (NEW):**
+  - Metadata: duration, width, height, fps, codec
+  - Calculated: aspect_ratio, orientation
+  - Orientation: 'horizontal' (AR>1.1), 'vertical' (AR<0.9), 'square'
+  - Icons: 🖥 (landscape), 📱 (portrait), ⬜ (square)
+
+  **Compatibility Checking (NEW):**
+  - Compares orientation across all videos
+  - Checks aspect ratio similarity (5% tolerance)
+  - Warns if videos can't be cleanly combined
+  - Required for combined video export
 
   **FFprobe Queries:**
   - Duration query: format=duration (container level)
-  - Video info query: stream=width,height,pix_fmt,codec_name,r_frame_rate
+  - Video info query: stream=width,height,codec_name,r_frame_rate
   - Uses -select_streams v:0 for first video stream
   - Output format: csv=p=0 (CSV without headers)
 
-  **Video Info Parsing:**
-  - FPS: Handles fraction format (e.g., "30/1" → 30.0)
-  - Error handling: Returns default values if parsing fails
-  - Pixel format: yuv420p is most common
-
-  **Project Storage:**
+  **Project Storage (v2 Format - NEW):**
   - Path: storage/projects/{project_name}/project.json
-  - Format: JSON with 2-space indentation
-  - Metadata: ISO 8601 timestamps
-
-  **Timeline Initialization:**
-  - video_path: Original video file path
-  - video_duration: Float (seconds)
-  - video_info: Dict with width, height, fps, codec, pix_fmt
-  - segments: Empty list (populated later)
+  - Format: JSON with "version": 2
+  - Contains array of Video objects
+  - Backwards compatible: v1 projects auto-migrate to v2
 
   **Default Settings:**
   - export_quality: "balanced" (CRF 23)

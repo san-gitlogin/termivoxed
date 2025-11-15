@@ -61,10 +61,16 @@ python main.py
 
    ```
    Project name: MyFirstProject
-   Video file path: /path/to/your/video.mp4
    ```
 
-3. **Add a segment (option 1):**
+3. **Select video files using the interactive file picker:**
+   - Navigate folders with arrow keys
+   - Press Enter to open folders
+   - Select the folder containing your videos
+   - Use Space key to select/deselect videos
+   - Press Enter to confirm selection
+
+4. **Add a segment (option 1 or 2 depending on project type):**
 
    ```
    Segment name: Intro
@@ -89,7 +95,7 @@ python main.py
 
 ## Example Workflow
 
-### Tutorial Video with Multiple Segments
+### Single Video Tutorial with Multiple Segments
 
 ```bash
 # 1. Start the editor
@@ -98,31 +104,69 @@ python main.py
 # 2. Create project
 > 1 (Create New Project)
 Project name: PythonTutorial
-Video file path: tutorial.mp4
 
-# 3. Add first segment
-> 1 (Add Segment)
+# 3. Select video using file picker
+Navigate to your video → Select with Space → Confirm with Enter
+
+# 4. Add first segment
+> 2 (Add Segment) # Menu number may vary
 Segment name: Introduction
 Start time: 0
 End time: 15
 Text: Welcome to this Python programming tutorial. Today we'll learn about functions.
 Language: en
 
-# 4. Add second segment
-> 1 (Add Segment)
+# 5. Add second segment
+> 2 (Add Segment)
 Segment name: Functions Explained
 Start time: 20
 End time: 45
 Text: A function is a block of reusable code that performs a specific task.
 Language: en
 
-# 5. Generate all voice-overs
-> 5 (Generate Voice-Overs)
+# 6. Generate all voice-overs
+> 6 (Generate Voice-Overs)
 
-# 6. Export video
-> 6 (Export Video)
+# 7. Export video
+> 7 (Export Video)
 Output: python_tutorial_final.mp4
 Quality: 2 (High)
+Subtitles: Yes
+```
+
+### Multi-Video Project Example
+
+```bash
+# 1. Start the editor
+python main.py
+
+# 2. Create multi-video project
+> 1 (Create New Project)
+Project name: VideoSeries
+
+# 3. Select multiple videos using file picker
+Navigate to folder → Use Space to select video1.mp4, video2.mp4, video3.mp4 → Confirm
+
+# 4. Work on first video (automatically active)
+> 6 (Add Segment) # For multi-video projects, segment options are offset
+Add segments to video1.mp4...
+
+# 5. Switch to second video
+> 1 (Select Active Video)
+Select: 2 (video2.mp4)
+
+# 6. Add segments to second video
+> 6 (Add Segment)
+Add segments to video2.mp4...
+
+# 7. Generate voice-overs for all videos
+> 10 (Generate Voice-Overs)
+
+# 8. Export combined video
+> 11 (Export Video)
+Select: 3 (Export combined video)
+Output: video_series_combined.mp4
+Quality: 3 (Balanced)
 Subtitles: Yes
 ```
 
@@ -162,15 +206,38 @@ Language: ta
 
 ### While in Project Menu
 
-- **1** - Add new segment
-- **2** - List all segments
-- **3** - Edit existing segment
-- **4** - Delete segment
-- **5** - Generate voice-overs for all segments
-- **6** - Export final video
-- **7** - Configure project settings
-- **8** - Save project
-- **9** - Return to main menu
+#### Single-Video Projects:
+- **1** - Add More Videos
+- **2** - Add new segment
+- **3** - List all segments
+- **4** - Edit existing segment
+- **5** - Delete segment
+- **6** - Generate voice-overs for all segments
+- **7** - Export final video
+- **8** - Configure project settings
+- **9** - Save project
+- **10** - Return to main menu
+
+#### Multi-Video Projects:
+**Video Management:**
+- **1** - Select Active Video
+- **2** - Add More Videos
+- **3** - Remove Video
+- **4** - Reorder Videos
+- **5** - Show All Videos
+
+**Segment Management:** (numbers 6-10)
+- **6** - Add new segment to active video
+- **7** - List segments of active video
+- **8** - Edit existing segment
+- **9** - Delete segment
+- **10** - Generate voice-overs for all segments
+
+**Export:** (numbers 11-14)
+- **11** - Export video (with 3 options for multi-video)
+- **12** - Configure project settings
+- **13** - Save project
+- **14** - Return to main menu
 
 ### Keyboard Shortcuts
 

@@ -12,6 +12,7 @@ class Segment:
     # Identity
     id: str = field(default_factory=lambda: str(uuid4()))
     name: str = ""
+    video_id: Optional[str] = None  # ID of the video this segment belongs to
 
     # Timing
     start_time: float = 0.0  # seconds
@@ -41,7 +42,7 @@ class Segment:
     # Subtitle border/outline styling
     subtitle_border_enabled: bool = True
     subtitle_border_style: int = 1  # 1=outline+box, 3=opaque box
-    subtitle_outline_width: float = 2.0  # Border/outline thickness
+    subtitle_outline_width: float = 0.5  # Border/outline thickness (reduced for thinner border)
     subtitle_outline_color: str = "&H00000000"  # Black outline
     subtitle_shadow: float = 0.0  # Shadow distance (0=no shadow)
     subtitle_shadow_color: str = "&H80000000"  # Semi-transparent black shadow

@@ -1,0 +1,191 @@
+@startuml 09.2_Export_Video_Part2
+title Flow 9.2: Export Video - Part 2 (Concatenation & Finalization)
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "core/export_pipeline.py\n::ExportPipeline" as Export
+participant "backend/ffmpeg_utils.py\n::FFmpegUtils" as FFmpeg
+participant "FFmpeg Binary" as FFmpegBin
+participant "FFprobe Binary" as FFprobeBin
+database "File System" as FileSystem
+
+== Export Video - Concatenation & Finalization ==
+
+note over User, FileSystem
+  **Continuing from Part 1**
+
+  All video parts have been processed:
+  - Pre-segment gaps
+  - Processed segments (with audio + subtitles)
+  - Post-segment gaps
+
+  These are stored in: all_parts[]
+
+  **Now proceeding with:**
+  - Concatenation
+  - Background music (optional)
+  - Cleanup
+  - Export completion
+
+  See diagram: 09.1_export_video_part1.puml for Part 1
+end note
+
+' Step 3: Concatenate all parts
+Export -> User: Progress: Combining video segments... (70%)
+
+Export -> Export: combined_path = temp/combined_{project_name}.mp4
+Export -> FFmpeg: concatenate_videos(all_parts, combined_path)
+activate FFmpeg
+
+FFmpeg -> FileSystem: Write concat file:\ntemp/concat_list.txt:\nfile '/abs/path/part_before_0.mp4'\nfile '/abs/path/segment_0_processed.mp4'\nfile '/abs/path/part_before_1.mp4'\n...
+
+FFmpeg -> FFmpegBin: ffmpeg -f concat -safe 0\n-i {concat_file}\n-c copy -y {output}
+FFmpegBin -> FFmpegBin: Concatenate all parts\nwithout re-encoding
+FFmpegBin --> FFmpeg: Success
+FFmpeg --> Export: Success
+deactivate FFmpeg
+
+' Step 4: Add background music (optional)
+alt background_music_path exists
+    Export -> User: Progress: Adding background music... (90%)
+    Export -> FFmpeg: add_background_music(\n  combined_path, music_path, output_path\n)
+    activate FFmpeg
+    FFmpeg -> FFprobe: get_media_duration(video_path)
+    FFprobe --> FFmpeg: video_dur
+    FFmpeg -> FFprobe: get_media_duration(music_path)
+    FFprobe --> FFmpeg: music_dur
+
+    FFmpeg -> FFmpeg: Calculate loops needed:\nloops = int(video_dur / music_dur) + 1
+
+    FFmpeg -> FFmpeg: Build filter:\n[0:a]volume=+3dB[boosted];\n[1:a]aloop=loop={loops}:size={samples},\nvolume=-16dB,\nafade=t=out:st={video_dur-3}:d=3,\natrim=duration={video_dur}[bg];\n[boosted][bg]amix=inputs=2:\nduration=first[aout]
+
+    FFmpeg -> FFmpegBin: ffmpeg -i {video} -i {music}\n-filter_complex "{filter}"\n-map 0:v -map [aout]\n-c:v copy -c:a aac -y {output}
+    FFmpegBin --> FFmpeg: Success
+    FFmpeg --> Export: Success
+    deactivate FFmpeg
+else no background music
+    Export -> FileSystem: shutil.copy(combined_path, output_path)
+end
+
+Export -> User: Progress: Export complete! (100%)
+
+' Cleanup
+Export -> Export: _cleanup_temp_files(all_parts, combined_path)
+loop For each temp file
+    Export -> FileSystem: os.unlink(file_path)
+end
+
+Export --> Main: Success
+deactivate Export
+
+Main -> FileSystem: Get file size: Path(output_path).stat().st_size
+FileSystem --> Main: size_bytes
+Main -> Main: size_mb = size_bytes / 1024 / 1024
+Main -> User: [green]✓ Export complete: MyProject_output.mp4[/green]\nFile size: 245.3 MB
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Multi-Video Export Modes (NEW):**
+  1. **Export Active Video**: Process only the currently active video
+     - Uses standard export pipeline
+     - Filename: {project}_{video_name}.mp4
+
+  2. **Export All Individually**: Process each video separately
+     - Loops through all videos in order
+     - Each exported to: {project}_{video_name}.mp4
+     - Progress: "Exporting {i}/{total}: {video_name}"
+
+  3. **Export Combined Video**: Combine all processed videos
+     - First: Export each video individually (with segments/audio)
+     - Then: Combine using VideoCombiner
+     - Compatibility check required
+     - Options: Simple concat (-c copy) OR complex (scaling/normalization)
+     - Filename: {project}_combined.mp4
+
+  **Video Combination (NEW - core/video_combiner.py):**
+  - check_compatibility(): Validates orientation & aspect ratio
+  - combine_videos_simple(): Fast concat for identical specs
+  - combine_videos_complex(): Smart scaling for different specs
+  - Supports force_export for incompatible videos (with warnings)
+
+  **Export Pipeline Stages:**
+  1. Timeline validation (overlaps, missing audio)
+  2. Font availability check (download if needed)
+  3. TTS audio generation (for missing segments)
+  4. Audio length validation (auto-extend segments)
+  5. Video segment processing (extract + process + gaps)
+  6. Concatenation (all parts into single video)
+  7. Background music (optional, with looping/fade)
+  8. Cleanup (temp files)
+
+  **FFmpeg Operations:**
+  - extract_video_segment: Fast stream copy or re-encode
+  - process_segment_video: Audio mix + subtitle burn + encode
+  - concatenate_videos: Concat demuxer (-c copy)
+  - add_background_music: Audio filters (aloop, afade, amix)
+
+  **Video Segment Strategy:**
+  - Preserves full original video
+  - Only segments with voice-overs are processed
+  - Gaps between segments: fast stream copy
+  - Processed segments: audio mix + subtitle overlay
+  - Final: concatenate all parts seamlessly
+
+  **Audio Mixing:**
+  - amix filter: inputs=2, duration=first
+  - TTS boost: +3dB (configurable)
+  - BGM reduction: -16dB (configurable)
+  - Auto-handles different durations
+
+  **Subtitle Processing:**
+  - SRT → ASS conversion (ffmpeg)
+  - Custom style application (ASS format)
+  - Font embedding via system fonts
+  - Border/outline/shadow support
+  - Burned into video (not soft subs)
+
+  **Quality Presets:**
+  - Lossless: CRF 0, preset medium
+  - High: CRF 18, preset medium
+  - Balanced: CRF 23, preset medium
+  - Codec: libx264 (H.264)
+  - Audio: AAC
+
+  **File Paths:**
+  - Temp: storage/temp/part_*.mp4, segment_*_processed.mp4
+  - Combined: storage/temp/combined_{name}.mp4
+  - Output: User-specified path
+  - Concat list: storage/temp/concat_list.txt
+
+  **Error Handling:**
+  - FFmpeg timeout: 300s per segment
+  - Missing audio: Validation before export
+  - Font installation failures: Fallback to system default
+  - Segment processing failures: Logged, export continues
+
+  **Performance:**
+  - Sequential processing (not parallel)
+  - Stream copy for unchanged parts (fast)
+  - Re-encoding only for processed segments
+  - Cleanup temp files after export
+
+  **Concatenation Process:**
+  - Uses FFmpeg concat demuxer
+  - Creates temp concat_list.txt with file paths
+  - All parts must have identical codec/resolution/fps
+  - Uses -c copy for lossless concatenation
+  - No re-encoding = very fast
+
+  **Background Music Process:**
+  - Checks video duration vs music duration
+  - Loops music if shorter than video
+  - Applies volume adjustments (boost TTS, reduce BGM)
+  - Adds fade-out at end (3 seconds)
+  - Mixes with existing audio track
+  - Copies video stream without re-encoding
+end note
+
+@enduml

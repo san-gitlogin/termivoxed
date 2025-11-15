@@ -57,40 +57,43 @@ class FFmpegUtils:
     @staticmethod
     def get_video_info(video_path: str) -> Optional[dict]:
         """Get video resolution, codec, and format information"""
+        import json
+
         try:
+            # Use JSON output for reliable field parsing
             cmd = [
                 settings.FFPROBE_PATH,
                 '-v', 'quiet',
                 '-select_streams', 'v:0',
                 '-show_entries', 'stream=width,height,pix_fmt,codec_name,r_frame_rate',
-                '-of', 'csv=p=0',
+                '-of', 'json',
                 video_path
             ]
             result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                info = result.stdout.strip().split(',')
-                if len(info) >= 4:
-                    # Parse with error handling
-                    try:
-                        width = int(info[0]) if info[0].isdigit() else 0
-                        height = int(info[1]) if info[1].isdigit() else 0
-                    except (ValueError, IndexError):
-                        width = 0
-                        height = 0
 
-                    pix_fmt = info[2] if len(info) > 2 else "yuv420p"
-                    codec = info[3] if len(info) > 3 else "unknown"
-                    fps = info[4] if len(info) > 4 else "30/1"
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+
+                if 'streams' in data and len(data['streams']) > 0:
+                    stream = data['streams'][0]
+
+                    width = stream.get('width', 0)
+                    height = stream.get('height', 0)
+                    pix_fmt = stream.get('pix_fmt', 'yuv420p')
+                    codec = stream.get('codec_name', 'unknown')
+                    fps_str = stream.get('r_frame_rate', '30/1')
 
                     # Parse FPS
                     try:
-                        if '/' in fps:
-                            num, den = fps.split('/')
+                        if '/' in fps_str:
+                            num, den = fps_str.split('/')
                             fps_val = float(num) / float(den) if float(den) != 0 else 30.0
                         else:
-                            fps_val = float(fps)
+                            fps_val = float(fps_str)
                     except (ValueError, ZeroDivisionError):
                         fps_val = 30.0
+
+                    logger.debug(f"Video info: {width}x{height}, {codec}, {pix_fmt}, {fps_val:.2f}fps")
 
                     return {
                         'width': width,
@@ -99,10 +102,80 @@ class FFmpegUtils:
                         'codec': codec,
                         'fps': round(fps_val, 2)
                     }
+
+            logger.warning(f"FFprobe returned no stream data for: {video_path}")
+            return None
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse FFprobe JSON output: {e}")
             return None
         except Exception as e:
             logger.error(f"Error getting video info: {e}")
             return None
+
+    @staticmethod
+    def add_silent_audio_track(video_path: str, output_path: str) -> bool:
+        """
+        Add a silent audio track to a video that has no audio
+
+        This is useful for videos without audio streams to ensure compatibility
+        when adding TTS voiceovers or background music later in the pipeline.
+
+        Args:
+            video_path: Path to input video (without audio)
+            output_path: Path to output video (with silent audio)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Check if video already has audio
+            if FFmpegUtils.has_audio_stream(video_path):
+                logger.info(f"Video already has audio, no need to add silent track")
+                return False
+
+            # Get video duration to match silent audio length
+            duration = FFmpegUtils.get_media_duration(video_path)
+            if not duration:
+                logger.error("Could not get video duration")
+                return False
+
+            logger.info(f"Adding silent audio track to video ({duration:.1f}s)")
+
+            # Use anullsrc to generate silent audio matching video duration
+            # Copy video stream, encode silent audio
+            cmd = [
+                settings.FFMPEG_PATH,
+                '-i', video_path,
+                '-f', 'lavfi',
+                '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+                '-t', str(duration),
+                '-c:v', 'copy',  # Copy video stream (fast, no re-encoding)
+                '-c:a', settings.DEFAULT_AUDIO_CODEC,  # Encode silent audio
+                '-shortest',  # Match video duration
+                '-y',
+                output_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                logger.info(f"✅ Silent audio track added successfully")
+
+                # Verify output has audio
+                if FFmpegUtils.has_audio_stream(output_path):
+                    logger.info("✅ Output verified to have audio stream")
+                    return True
+                else:
+                    logger.error("❌ Failed to add audio stream")
+                    return False
+            else:
+                logger.error(f"Failed to add silent audio: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error adding silent audio track: {e}")
+            return False
 
     @staticmethod
     def extract_video_segment(
@@ -128,20 +201,45 @@ class FFmpegUtils:
 
             if re_encode:
                 # Re-encode to ensure consistent format for concatenation
-                cmd = [
-                    settings.FFMPEG_PATH,
-                    '-ss', str(start_time),
-                    '-i', video_path,
-                    '-t', str(duration),
-                    '-c:v', settings.DEFAULT_VIDEO_CODEC,
-                    '-c:a', settings.DEFAULT_AUDIO_CODEC,
-                    '-preset', settings.DEFAULT_PRESET,
-                    '-crf', str(settings.DEFAULT_CRF),
-                    '-pix_fmt', 'yuv420p',  # Ensure consistent pixel format
-                    '-y',
-                    output_path
-                ]
-                logger.info(f"Extracting and re-encoding segment: {start_time:.1f}s - {end_time:.1f}s")
+                # Check if video has audio to ensure consistent stream structure
+                has_audio = FFmpegUtils.has_audio_stream(video_path)
+
+                if has_audio:
+                    # Video has audio - re-encode normally
+                    cmd = [
+                        settings.FFMPEG_PATH,
+                        '-ss', str(start_time),
+                        '-i', video_path,
+                        '-t', str(duration),
+                        '-c:v', settings.DEFAULT_VIDEO_CODEC,
+                        '-c:a', settings.DEFAULT_AUDIO_CODEC,
+                        '-preset', settings.DEFAULT_PRESET,
+                        '-crf', str(settings.DEFAULT_CRF),
+                        '-pix_fmt', 'yuv420p',  # Ensure consistent pixel format
+                        '-y',
+                        output_path
+                    ]
+                    logger.info(f"Extracting and re-encoding segment: {start_time:.1f}s - {end_time:.1f}s")
+                else:
+                    # Video has no audio - add silent audio track for concatenation compatibility
+                    # This ensures all parts have matching streams when concatenating
+                    cmd = [
+                        settings.FFMPEG_PATH,
+                        '-ss', str(start_time),
+                        '-i', video_path,
+                        '-f', 'lavfi',
+                        '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+                        '-t', str(duration),
+                        '-c:v', settings.DEFAULT_VIDEO_CODEC,
+                        '-c:a', settings.DEFAULT_AUDIO_CODEC,
+                        '-preset', settings.DEFAULT_PRESET,
+                        '-crf', str(settings.DEFAULT_CRF),
+                        '-pix_fmt', 'yuv420p',
+                        '-shortest',  # Match shortest input (video duration)
+                        '-y',
+                        output_path
+                    ]
+                    logger.info(f"Extracting and re-encoding segment with silent audio: {start_time:.1f}s - {end_time:.1f}s")
             else:
                 # Fast stream copy
                 cmd = [
@@ -343,11 +441,22 @@ class FFmpegUtils:
     def add_background_music(
         video_path: str,
         music_path: str,
-        output_path: str
+        output_path: str,
+        tts_boost: Optional[float] = None,
+        bgm_reduction: Optional[float] = None,
+        fade_duration: Optional[float] = None
     ) -> bool:
         """
         PROVEN: Add looping background music with fade effects
         From: FFmpeg_Video_Generation_Documentation.md
+
+        Args:
+            video_path: Path to input video
+            music_path: Path to background music
+            output_path: Path to output video
+            tts_boost: TTS volume boost in dB (default from settings)
+            bgm_reduction: BGM volume reduction in dB (default from settings)
+            fade_duration: Fade out duration in seconds (default from settings)
         """
         try:
             if not os.path.exists(music_path):
@@ -362,10 +471,40 @@ class FFmpegUtils:
                 logger.error("Could not get durations")
                 return False
 
-            fade_duration = settings.FADE_DURATION
+            # Use provided values or defaults from settings
+            if fade_duration is None:
+                fade_duration = settings.FADE_DURATION
+            if tts_boost is None:
+                tts_boost = settings.TTS_VOLUME_BOOST
+            if bgm_reduction is None:
+                bgm_reduction = settings.BGM_VOLUME_REDUCTION
 
-            # Check if video has audio
+            # Check if video has audio with detailed debugging
             has_audio = FFmpegUtils.has_audio_stream(video_path)
+
+            # Additional debug: Get detailed stream info
+            try:
+                probe_cmd = [
+                    settings.FFPROBE_PATH,
+                    '-v', 'quiet',
+                    '-print_format', 'json',
+                    '-show_streams',
+                    video_path
+                ]
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                if probe_result.returncode == 0:
+                    import json
+                    probe_data = json.loads(probe_result.stdout)
+                    audio_streams = [s for s in probe_data.get('streams', []) if s.get('codec_type') == 'audio']
+                    logger.info(f"🔍 Video stream analysis:")
+                    logger.info(f"   - Audio streams detected: {len(audio_streams)}")
+                    if audio_streams:
+                        for i, stream in enumerate(audio_streams):
+                            logger.info(f"   - Stream {i}: {stream.get('codec_name', 'unknown')} @ {stream.get('sample_rate', 'unknown')}Hz")
+            except Exception as e:
+                logger.warning(f"Could not get detailed stream info: {e}")
+
+            logger.info(f"🎚️ Volume adjustments: TTS +{tts_boost}dB, BGM -{bgm_reduction}dB")
 
             # Calculate loops needed
             if video_duration > music_duration:
@@ -373,11 +512,15 @@ class FFmpegUtils:
             else:
                 loops_needed = 0
 
-            # Build filter based on audio presence
-            tts_boost = settings.TTS_VOLUME_BOOST
-            bgm_reduction = settings.BGM_VOLUME_REDUCTION
+            logger.info(f"🔄 Background music loops needed: {loops_needed}")
 
+            # Build filter based on whether video has audio
             if has_audio:
+                # Video has audio - mix it with background music
+                # Based on proven reference implementation (cl_vid_gen_2.py lines 859-878)
+                # +3dB TTS boost, -16dB BGM reduction = 19dB difference favoring speech
+                # duration=first means output duration matches first input (video)
+                # dropout_transition=0 prevents sudden transitions
                 if loops_needed > 0:
                     filter_complex = (
                         f"[0:a]volume=+{tts_boost}dB[boosted_video];"
@@ -395,8 +538,12 @@ class FFmpegUtils:
                         f"atrim=duration={video_duration}[bg];"
                         f"[boosted_video][bg]amix=inputs=2:duration=first:dropout_transition=0[aout]"
                     )
+                logger.info("🎵 Mixing video audio (TTS) with background music")
+                logger.info(f"   TTS boost: +{tts_boost}dB | BGM reduction: -{bgm_reduction}dB")
+                logger.info(f"   This creates a {tts_boost + bgm_reduction}dB difference favoring TTS")
+                logger.info(f"   Using duration=first to match video duration (reference: cl_vid_gen.py:901)")
             else:
-                # Video has no audio
+                # Video has no audio - just add background music
                 if loops_needed > 0:
                     filter_complex = (
                         f"[1:a]aloop=loop={loops_needed}:size={int(music_duration * 44100)},"
@@ -410,6 +557,7 @@ class FFmpegUtils:
                         f"afade=t=out:st={video_duration-fade_duration}:d={fade_duration},"
                         f"atrim=duration={video_duration}[aout]"
                     )
+                logger.info("🎵 Adding background music (video has no audio)")
 
             cmd = [
                 settings.FFMPEG_PATH,
@@ -425,14 +573,57 @@ class FFmpegUtils:
             ]
 
             logger.info("Adding background music with fade effects")
+            logger.info(f"🎛️ Filter complex: {filter_complex}")
+            logger.debug(f"FFmpeg command: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode == 0 and os.path.exists(output_path):
                 size = os.path.getsize(output_path) / 1024 / 1024
-                logger.info(f"Background music added: {size:.1f}MB")
+                logger.info(f"✅ Background music added successfully: {size:.1f}MB")
+
+                # Verify output has audio
+                output_has_audio = FFmpegUtils.has_audio_stream(output_path)
+                if output_has_audio:
+                    logger.info("✅ Output video verified to have audio stream")
+                else:
+                    logger.error("⚠️ WARNING: Output video has no audio stream!")
+
+                # Get detailed audio info
+                try:
+                    probe_cmd = [
+                        settings.FFPROBE_PATH,
+                        '-v', 'quiet',
+                        '-print_format', 'json',
+                        '-show_streams',
+                        '-select_streams', 'a',
+                        output_path
+                    ]
+                    probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                    if probe_result.returncode == 0:
+                        import json
+                        probe_data = json.loads(probe_result.stdout)
+                        audio_streams = probe_data.get('streams', [])
+                        if audio_streams:
+                            for i, stream in enumerate(audio_streams):
+                                codec = stream.get('codec_name', 'unknown')
+                                sample_rate = stream.get('sample_rate', 'unknown')
+                                channels = stream.get('channels', 'unknown')
+                                logger.info(f"   Output audio stream {i}: {codec} @ {sample_rate}Hz, {channels} channels")
+                        else:
+                            logger.warning("   No audio streams found in output")
+                except Exception as e:
+                    logger.warning(f"Could not probe output audio: {e}")
+
                 return True
             else:
-                logger.error(f"Failed to add background music: {result.stderr}")
+                logger.error(f"❌ Failed to add background music")
+                logger.error(f"FFmpeg stderr: {result.stderr}")
+
+                # Log the input file info for debugging
+                logger.error(f"Input video path: {video_path}")
+                logger.error(f"Input video had audio: {has_audio}")
+                logger.error(f"Music path: {music_path}")
+
                 return False
 
         except Exception as e:

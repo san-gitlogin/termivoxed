@@ -11,8 +11,8 @@ participant "main.py\n::show_main_menu()" as MainMenu
 
 Main -> MainMenu: show_main_menu()
 activate MainMenu
-MainMenu -> User: Display menu options:\n\n[bold cyan]Main Menu[/bold cyan]\n1. Create New Project\n2. Open Existing Project\n3. List All Projects\n4. Exit\n\nSelect option [1-4]:
-User --> MainMenu: User input (1, 2, 3, or 4)
+MainMenu -> User: Display menu options:\n\n[bold cyan]Main Menu[/bold cyan]\n1. Create New Project\n2. Open Existing Project\n3. List All Projects\n4. Delete Project\n5. Exit\n\nSelect option [1-5]:
+User --> MainMenu: User input (1, 2, 3, 4, or 5)
 MainMenu --> Main: choice
 deactivate MainMenu
 
@@ -23,6 +23,8 @@ else choice = "2"
 else choice = "3"
     Main -> Main: Navigate to list_projects()
 else choice = "4"
+    Main -> Main: Navigate to delete_project()
+else choice = "5"
     Main -> User: Thank you for using TermiVoxed!
     Main -> Main: Exit application
 end
@@ -44,7 +46,8 @@ note over User, MainMenu
   - Choice 1 → create_new_project() (async)
   - Choice 2 → open_existing_project() (async)
   - Choice 3 → list_projects() (sync)
-  - Choice 4 → break loop and exit
+  - Choice 4 → delete_project() (sync)
+  - Choice 5 → break loop and exit
 
   **Error Handling:**
   - Invalid input: Prompt.ask() validates choices

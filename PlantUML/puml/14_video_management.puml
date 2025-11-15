@@ -1,0 +1,229 @@
+@startuml 14_Video_Management
+title Flow 14: Video Management (Multi-Video Projects)
+autonumber
+
+' Participants
+actor User
+participant "main.py\n::ConsoleEditor" as Main
+participant "models/project.py\n::Project" as Project
+participant "models/video.py\n::Video" as VideoModel
+participant "utils/file_picker.py\n::FilePicker" as Picker
+participant "backend/ffmpeg_utils.py\n::FFmpegUtils" as FFmpeg
+database "File System" as FileSystem
+
+== Video Management Menu (Multi-Video Projects Only) ==
+
+note over User, FileSystem
+  **Context:**
+  This flow is only available for projects with 1+ videos.
+  Menu options 1-5 are video management options.
+  These options are inserted before segment management options.
+end note
+
+Main -> User: Display video management menu:\n\n[bold]Video Management:[/bold]\n1. Select Active Video\n2. Add More Videos\n3. Remove Video\n4. Reorder Videos\n5. Show All Videos\n\nSelect option:
+User --> Main: choice
+
+alt choice = "1" - Select Active Video
+    Main -> Project: Get all videos: project.videos[]
+    Project --> Main: List of Video instances
+
+    Main -> User: Display video selection table:\n\nID | Name | Duration | Resolution | Orientation\n1  | video1.mp4 | 120.5s | 1920x1080 | 🖥 Landscape\n2  | video2.mp4 | 90.3s  | 1080x1920 | 📱 Portrait\n\nSelect video [1-N]:
+    User --> Main: selected_index = 1
+
+    Main -> Project: set_active_video(video_id)
+    activate Project
+    Project -> Project: self.active_video_id = video_id
+    Project --> Main: Success
+    deactivate Project
+
+    Main -> User: [green]✓ Active video set to: video1.mp4[/green]
+
+else choice = "2" - Add More Videos
+    Main -> User: Display: "Select additional videos..."
+    Main -> Picker: pick_video_files()
+    activate Picker
+
+    Picker -> User: Interactive File Picker:\n- Navigate folders\n- Multi-select with Space\n- Confirm with Enter
+    User --> Picker: video_paths = ["/path/video3.mp4"]
+    Picker --> Main: video_paths
+    deactivate Picker
+
+    alt No videos selected
+        Main -> User: [yellow]No videos selected[/yellow]
+    else Videos selected
+        loop For each video_path
+            Main -> Project: add_video(video_path)
+            activate Project
+
+            Project -> VideoModel: Video.create(name, path, order)
+            activate VideoModel
+
+            ' Get video metadata
+            VideoModel -> FFmpeg: get_media_duration(video_path)
+            FFmpeg --> VideoModel: duration
+
+            VideoModel -> FFmpeg: get_video_info(video_path)
+            FFmpeg --> VideoModel: {width, height, fps, codec}
+
+            VideoModel -> VideoModel: Calculate:\n- aspect_ratio\n- orientation (horizontal/vertical/square)
+            VideoModel --> Project: Video instance
+            deactivate VideoModel
+
+            Project -> Project: self.videos.append(video)\nAssign order = len(videos)
+            Project --> Main: Success
+            deactivate Project
+
+            Main -> User: [green]✓ Added: {video_name}[/green]
+        end
+
+        ' Check compatibility after adding
+        Main -> Project: check_video_compatibility()
+        activate Project
+        Project -> Project: Compare orientations & aspect ratios
+        alt All compatible
+            Project --> Main: (True, [])
+            Main -> User: [green]✓ All videos are compatible[/green]
+        else Incompatibilities found
+            Project --> Main: (False, warnings)
+            Main -> User: [yellow]⚠ Compatibility warnings:[/yellow]\n• Different orientations detected\n• Aspect ratios vary
+        end
+        deactivate Project
+
+        Main -> Project: save()
+    end
+
+else choice = "3" - Remove Video
+    alt Only one video in project
+        Main -> User: [red]Cannot remove the only video in project[/red]
+    else Multiple videos
+        Main -> Project: Get all videos
+        Project --> Main: videos[]
+
+        Main -> User: Display video list:\n\nID | Name | Active\n1  | video1.mp4 | ✓\n2  | video2.mp4 |\n3  | video3.mp4 |\n\nSelect video to remove [1-N]:
+        User --> Main: selected_index
+
+        Main -> User: Confirm: "Remove {video_name}?\nThis will delete all its segments!"
+        User --> Main: confirmed = True
+
+        alt User confirmed
+            Main -> Project: remove_video(video_id)
+            activate Project
+
+            Project -> Project: Check if removing active video
+            alt Removing active video
+                Project -> Project: Set new active_video_id\n(first remaining video)
+            end
+
+            Project -> Project: self.videos.remove(video)\nReorder remaining videos
+            Project --> Main: Success
+            deactivate Project
+
+            Main -> User: [green]✓ Video removed: {video_name}[/green]
+            Main -> Project: save()
+        end
+    end
+
+else choice = "4" - Reorder Videos
+    Main -> Project: Get all videos in order
+    Project --> Main: videos sorted by order
+
+    Main -> User: Display current order:\n\n1. video1.mp4\n2. video2.mp4\n3. video3.mp4\n\nCombined video will play in this order.
+    Main -> User: Prompt: "Video to move" [1-N]
+    User --> Main: source_index = 2
+
+    Main -> User: Prompt: "New position" [1-N]
+    User --> Main: target_index = 1
+
+    Main -> Project: reorder_videos(source_idx, target_idx)
+    activate Project
+
+    Project -> Project: video = videos.pop(source_idx)\nvideos.insert(target_idx, video)
+    loop For each video in videos
+        Project -> Project: Update video.order = index
+    end
+
+    Project --> Main: Success
+    deactivate Project
+
+    Main -> User: Display new order:\n\n1. video2.mp4 ⬆\n2. video1.mp4 ⬇\n3. video3.mp4\n\n[green]✓ Videos reordered[/green]
+
+    Main -> Project: save()
+
+else choice = "5" - Show All Videos
+    Main -> Project: Get all videos
+    Project --> Main: videos[]
+
+    Main -> User: Display detailed video table:\n\n[bold cyan]Project Videos[/bold cyan]\n\n╔════╦═════════════╦══════════╦═════════════╦═══════╦═══════════╗\n║ ID ║ Name        ║ Duration ║ Resolution  ║ FPS   ║ Orient.   ║\n╠════╬═════════════╬══════════╬═════════════╬═══════╬═══════════╣\n║ 1✓ ║ video1.mp4  ║ 120.5s   ║ 1920x1080   ║ 30    ║ 🖥 Land.  ║\n║ 2  ║ video2.mp4  ║ 90.3s    ║ 1920x1080   ║ 30    ║ 🖥 Land.  ║\n║ 3  ║ video3.mp4  ║ 45.8s    ║ 1920x1080   ║ 30    ║ 🖥 Land.  ║\n╚════╩═════════════╩══════════╩═════════════╩═══════╩═══════════╝\n\n✓ = Active video for editing\nTotal videos: 3\nTotal duration: 256.6s\nCompatibility: ✓ All compatible
+
+    Main -> User: Press Enter to continue...
+    User --> Main: Enter
+end
+
+note over User, FileSystem
+  **Technical Details:**
+
+  **Active Video Concept:**
+  - Only one video can be "active" at a time
+  - All segment operations (add/edit/delete) apply to active video
+  - Active video indicated with ✓ in listings
+  - Switching active video changes which timeline is being edited
+
+  **Video Order:**
+  - Videos have an "order" attribute (1, 2, 3...)
+  - Order determines sequence in combined export
+  - Reordering updates all video.order values
+  - Order preserved in project JSON
+
+  **Video Metadata (models/video.py):**
+  - id: UUID for unique identification
+  - name: Display name (from filename)
+  - path: Absolute path to video file
+  - order: Position in sequence
+  - duration: Float (seconds) from FFprobe
+  - width, height: Resolution from FFprobe
+  - fps: Frame rate from FFprobe
+  - codec: Video codec from FFprobe
+  - aspect_ratio: Calculated (width/height)
+  - orientation: Calculated ('horizontal', 'vertical', 'square')
+  - timeline: Timeline instance with segments
+
+  **Orientation Icons:**
+  - 🖥 Landscape: aspect_ratio > 1.1
+  - 📱 Portrait: aspect_ratio < 0.9
+  - ⬜ Square: 0.9 ≤ aspect_ratio ≤ 1.1
+
+  **Compatibility Checking:**
+  - Compares all videos' orientations
+  - Checks aspect ratio similarity (5% tolerance)
+  - Warns if incompatible but allows force export
+  - Required for clean combined video export
+
+  **File Picker (utils/file_picker.py):**
+  - Two-stage: Navigate folders → Multi-select videos
+  - Arrow keys (↑/↓) for navigation
+  - Space key for selection toggle
+  - Enter to confirm
+  - Supports .mp4, .avi, .mov, .mkv, .webm, etc.
+  - Shows file sizes during selection
+
+  **Project Save Format (v2):**
+  - "version": 2 indicates multi-video support
+  - "videos": Array of Video objects (full metadata)
+  - "active_video_id": UUID of current active video
+  - Backwards compatible: v1 projects auto-migrate
+
+  **Video Removal:**
+  - Removes video from project.videos[]
+  - Deletes all segments in that video's timeline
+  - If removing active video, sets new active
+  - Cannot remove if it's the only video
+  - Project is auto-saved after removal
+
+  **Menu Numbering:**
+  - Single-video project: Video mgmt options 1
+  - Multi-video project: Video mgmt options 1-5
+  - Segment options offset accordingly
+  - Export options further offset
+end note
+
+@enduml

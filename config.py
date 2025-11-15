@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     BALANCED_CRF: int = 23
 
     # Audio mixing
+    # Based on proven reference implementation (cl_vid_gen_2.py)
+    # TTS boost: +3dB ensures voice-over is clear and audible
+    # BGM reduction: -16dB creates 19dB difference favoring speech over background music
     TTS_VOLUME_BOOST: int = 3
     BGM_VOLUME_REDUCTION: int = 16
     FADE_DURATION: float = 3.0

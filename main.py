@@ -19,6 +19,7 @@ from models import Project
 from core import ExportPipeline
 from backend.tts_service import TTSService
 from utils.logger import logger, suppress_console_logs
+from utils.file_picker import pick_video_files
 
 console = Console()
 
@@ -30,6 +31,37 @@ class ConsoleEditor:
         self.project: Project = None
         self.tts_service = TTSService()
         self._voice_cache = {}  # Cache for available voices per language
+
+    @staticmethod
+    def sanitize_path(path: str) -> str:
+        """
+        Sanitize file paths by removing surrounding quotes and whitespace
+        Handles paths pasted with single or double quotes
+
+        Args:
+            path: Raw path string from user input
+
+        Returns:
+            Cleaned path string
+        """
+        if not path:
+            return path
+
+        # Strip whitespace
+        path = path.strip()
+
+        # Remove surrounding single quotes
+        if path.startswith("'") and path.endswith("'"):
+            path = path[1:-1]
+
+        # Remove surrounding double quotes
+        if path.startswith('"') and path.endswith('"'):
+            path = path[1:-1]
+
+        # Strip any remaining whitespace
+        path = path.strip()
+
+        return path
 
     def show_banner(self):
         """Display application banner"""
@@ -50,44 +82,71 @@ class ConsoleEditor:
         console.print("1. Create New Project")
         console.print("2. Open Existing Project")
         console.print("3. List All Projects")
-        console.print("4. Exit")
+        console.print("4. Delete Project")
+        console.print("5. Exit")
 
-        choice = Prompt.ask("\nSelect option", choices=["1", "2", "3", "4"], default="1")
+        choice = Prompt.ask("\nSelect option", choices=["1", "2", "3", "4", "5"], default="1")
         return choice
 
     async def create_new_project(self):
-        """Create a new project"""
+        """Create a new project with multi-video support"""
         console.print("\n[bold green]Create New Project[/bold green]")
 
         try:
             # Get project name
             project_name = Prompt.ask("Project name")
 
-            # Get video file path
-            video_path = Prompt.ask("Video file path (absolute path)")
+            # Use interactive file picker for video selection
+            console.print("\n[cyan]Select video files for your project...[/cyan]")
+            video_paths = pick_video_files()
+
+            if not video_paths:
+                console.print("[yellow]No videos selected. Project creation cancelled.[/yellow]")
+                return
+
         except KeyboardInterrupt:
             console.print("\n[yellow]Project creation cancelled[/yellow]")
             return
 
-        if not Path(video_path).exists():
-            console.print(f"[red]Error: Video file not found: {video_path}[/red]")
-            return
-
         try:
-            # Create project
-            self.project = Project(project_name, video_path)
+            # Create project with selected videos
+            self.project = Project(project_name, video_paths)
 
             # Display video info
-            info = self.project.timeline.video_info
-            console.print(f"\n[green]✓ Video loaded successfully[/green]")
-            console.print(f"  Duration: {self.project.timeline.video_duration:.2f}s")
-            console.print(f"  Resolution: {info['width']}x{info['height']}")
-            console.print(f"  FPS: {info['fps']}")
-            console.print(f"  Codec: {info['codec']}")
+            console.print(f"\n[green]✓ Project created with {len(self.project.videos)} video(s)[/green]")
+
+            table = Table(title="Videos in Project")
+            table.add_column("No.", style="cyan")
+            table.add_column("Name", style="green")
+            table.add_column("Duration", style="yellow")
+            table.add_column("Resolution", style="blue")
+            table.add_column("Orientation", style="magenta")
+
+            for idx, video in enumerate(sorted(self.project.videos, key=lambda v: v.order), 1):
+                info = video.get_display_info()
+                table.add_row(
+                    str(idx),
+                    video.name,
+                    info['duration'],
+                    info['resolution'],
+                    f"{info['orientation_icon']} {info['orientation']}"
+                )
+
+            console.print(table)
+
+            # Check compatibility if multiple videos
+            if len(self.project.videos) > 1:
+                is_compatible, warnings = self.project.check_video_compatibility()
+                if warnings:
+                    console.print("\n[yellow]⚠ Video Compatibility Warnings:[/yellow]")
+                    for warning in warnings:
+                        console.print(f"  [yellow]• {warning}[/yellow]")
+                else:
+                    console.print("\n[green]✓ All videos are compatible for combination[/green]")
 
             # Save project
             self.project.save()
-            console.print(f"[green]✓ Project created: {project_name}[/green]")
+            console.print(f"\n[green]✓ Project saved: {project_name}[/green]")
 
             await self.project_menu()
 
@@ -110,15 +169,16 @@ class ConsoleEditor:
         table = Table(title="Available Projects")
         table.add_column("No.", style="cyan")
         table.add_column("Name", style="green")
-        table.add_column("Video", style="white")
+        table.add_column("Videos", style="white")
         table.add_column("Segments", style="yellow")
         table.add_column("Modified", style="magenta")
 
         for i, proj in enumerate(projects, 1):
+            video_count = proj.get("video_count", 1)
             table.add_row(
                 str(i),
                 proj["name"],
-                Path(proj["video_path"]).name,
+                str(video_count),
                 str(proj["segments_count"]),
                 proj["modified_at"][:19]
             )
@@ -141,7 +201,54 @@ class ConsoleEditor:
             self.project = Project.load(project_name)
 
             if self.project:
-                console.print(f"[green]✓ Project loaded: {project_name}[/green]")
+                # Validate that all video files still exist
+                missing_videos = []
+                for video in self.project.videos:
+                    if not Path(video.path).exists():
+                        missing_videos.append(video)
+
+                if missing_videos:
+                    console.print(f"\n[yellow]⚠ Warning: {len(missing_videos)} video file(s) no longer exist:[/yellow]")
+                    for video in missing_videos:
+                        console.print(f"  [red]✗ {video.name}[/red]")
+                        console.print(f"    [dim]Previous path: {video.path}[/dim]")
+
+                    console.print("\n[cyan]Options:[/cyan]")
+                    console.print("1. Add new video(s) to replace missing ones")
+                    console.print("2. Keep project as-is (you can add videos later)")
+                    console.print("3. Cancel and return to main menu")
+
+                    option = Prompt.ask("Select option", choices=["1", "2", "3"], default="2")
+
+                    if option == "1":
+                        # Allow user to add new videos
+                        console.print("\n[cyan]Select replacement/additional videos...[/cyan]")
+                        video_paths = pick_video_files()
+
+                        if video_paths:
+                            for video_path in video_paths:
+                                try:
+                                    video_name = Path(video_path).stem
+                                    video = self.project.add_video(video_path, name=video_name)
+                                    console.print(f"[green]✓ Added: {video_name}[/green]")
+                                except Exception as e:
+                                    console.print(f"[red]Failed to add {Path(video_path).name}: {e}[/red]")
+
+                            self.project.save()
+                            console.print(f"[green]✓ Project updated with new videos[/green]")
+                        else:
+                            console.print("[yellow]No videos added[/yellow]")
+
+                    elif option == "3":
+                        console.print("[yellow]Project loading cancelled[/yellow]")
+                        return
+
+                    # Option 2 or after adding videos, proceed to project menu
+                    console.print(f"[green]✓ Project loaded: {project_name}[/green]")
+
+                else:
+                    console.print(f"[green]✓ Project loaded: {project_name}[/green]")
+
                 await self.project_menu()
             else:
                 console.print(f"[red]Failed to load project[/red]")
@@ -162,15 +269,16 @@ class ConsoleEditor:
 
         table = Table()
         table.add_column("Name", style="green")
-        table.add_column("Video", style="white")
+        table.add_column("Videos", style="white")
         table.add_column("Segments", style="yellow")
         table.add_column("Created", style="cyan")
         table.add_column("Modified", style="magenta")
 
         for proj in projects:
+            video_count = proj.get("video_count", 1)
             table.add_row(
                 proj["name"],
-                Path(proj["video_path"]).name,
+                str(video_count),
                 str(proj["segments_count"]),
                 proj["created_at"][:19],
                 proj["modified_at"][:19]
@@ -178,50 +286,205 @@ class ConsoleEditor:
 
         console.print(table)
 
+    def delete_project(self):
+        """Delete an existing project with confirmation"""
+        console.print("\n[bold red]Delete Project[/bold red]")
+        console.print("[yellow]⚠ Warning: This will permanently delete the project and all its data![/yellow]\n")
+
+        # List available projects
+        projects = Project.list_projects()
+
+        if not projects:
+            console.print("[yellow]No projects found[/yellow]")
+            return
+
+        # Display projects
+        table = Table(title="Available Projects")
+        table.add_column("No.", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Videos", style="white")
+        table.add_column("Segments", style="yellow")
+        table.add_column("Modified", style="magenta")
+
+        for i, proj in enumerate(projects, 1):
+            video_count = proj.get("video_count", 1)
+            table.add_row(
+                str(i),
+                proj["name"],
+                str(video_count),
+                str(proj["segments_count"]),
+                proj["modified_at"][:19]
+            )
+
+        console.print(table)
+
+        # Select project
+        choice = IntPrompt.ask(
+            "Select project number to delete (0 to cancel)",
+            default=0
+        )
+
+        if choice == 0 or choice > len(projects):
+            console.print("[yellow]Deletion cancelled[/yellow]")
+            return
+
+        # Get project name
+        project_name = projects[choice - 1]["name"]
+
+        # Double confirmation
+        console.print(f"\n[bold red]You are about to delete project: '{project_name}'[/bold red]")
+        console.print("[yellow]This action cannot be undone![/yellow]\n")
+
+        if not Confirm.ask(f"Are you sure you want to delete '{project_name}'?", default=False):
+            console.print("[yellow]Deletion cancelled[/yellow]")
+            return
+
+        # Final confirmation by typing project name
+        confirmation_name = Prompt.ask(
+            f"Type the project name '{project_name}' to confirm deletion",
+            default=""
+        )
+
+        if confirmation_name != project_name:
+            console.print("[yellow]Project name doesn't match. Deletion cancelled[/yellow]")
+            return
+
+        # Load and delete project
+        try:
+            # Create a temporary project instance just to call delete
+            project_dir = Path(settings.PROJECTS_DIR) / project_name
+            if project_dir.exists():
+                import shutil
+                shutil.rmtree(project_dir)
+                console.print(f"[green]✓ Project '{project_name}' has been permanently deleted[/green]")
+                logger.info(f"Project deleted by user: {project_name}")
+            else:
+                console.print(f"[red]Error: Project directory not found[/red]")
+
+        except Exception as e:
+            console.print(f"[red]Error deleting project: {e}[/red]")
+            logger.error(f"Error deleting project: {e}")
+
     async def project_menu(self):
-        """Project-specific menu"""
+        """Project-specific menu with multi-video support"""
         while True:
             console.print(f"\n[bold cyan]Project: {self.project.name}[/bold cyan]")
-            console.print(f"Video: {Path(self.project.video_path).name} (Duration: {self.project.timeline.video_duration:.2f}s)")
-            console.print(f"Segments: {len(self.project.timeline.segments)}")
+            console.print(f"Videos: {len(self.project.videos)}")
 
-            # Show quick segment overview
-            if self.project.timeline.segments:
-                total_coverage = sum(seg.duration for seg in self.project.timeline.segments)
-                console.print(f"[dim]Total segment coverage: {total_coverage:.2f}s ({(total_coverage/self.project.timeline.video_duration*100):.1f}%)[/dim]")
+            # Show active video info
+            active_video = self.project.get_active_video()
+            if active_video:
+                info = active_video.get_display_info()
+                console.print(f"[green]Active Video:[/green] {active_video.name}")
+                console.print(f"  Duration: {info['duration']} | Resolution: {info['resolution']} | {info['orientation_icon']} {info['orientation']}")
+                console.print(f"  Segments: {info['segments']}")
 
-            console.print("\n1. Add Segment")
-            console.print("2. List Segments")
-            console.print("3. Edit Segment")
-            console.print("4. Delete Segment")
-            console.print("5. Generate Voice-Overs")
-            console.print("6. Export Video")
-            console.print("7. Project Settings")
-            console.print("8. Save Project")
-            console.print("9. Back to Main Menu")
+                # Show quick segment overview for active video
+                if active_video.timeline.segments:
+                    total_coverage = sum(seg.duration for seg in active_video.timeline.segments)
+                    coverage_pct = (total_coverage / active_video.duration * 100) if active_video.duration else 0
+                    console.print(f"  [dim]Segment coverage: {total_coverage:.2f}s ({coverage_pct:.1f}%)[/dim]")
 
-            choice = Prompt.ask("Select option", choices=[str(i) for i in range(1, 10)])
+            # Menu options - Always show video management, but hide some options for single-video
+            menu_options = []
 
-            if choice == "1":
-                await self.add_segment()
-            elif choice == "2":
-                self.list_segments()
-            elif choice == "3":
-                await self.edit_segment()
-            elif choice == "4":
-                self.delete_segment()
-            elif choice == "5":
-                await self.generate_voiceovers()
-            elif choice == "6":
-                await self.export_video()
-            elif choice == "7":
-                self.project_settings()
-            elif choice == "8":
-                self.project.save()
-                console.print("[green]✓ Project saved[/green]")
-            elif choice == "9":
-                self.project.save()
-                break
+            if len(self.project.videos) > 1:
+                menu_options.extend([
+                    "\n[bold yellow]Video Management:[/bold yellow]",
+                    "1. Select Active Video",
+                    "2. Add More Videos",
+                    "3. Remove Video",
+                    "4. Reorder Videos",
+                    "5. Show All Videos"
+                ])
+                segment_offset = 5
+            else:
+                # Single video project - only show "Add More Videos" option
+                menu_options.extend([
+                    "\n[bold yellow]Video Management:[/bold yellow]",
+                    "1. Add More Videos"
+                ])
+                segment_offset = 1
+
+            menu_options.extend([
+                "\n[bold yellow]Segment Management:[/bold yellow]",
+                f"{segment_offset + 1}. Add Segment",
+                f"{segment_offset + 2}. List Segments",
+                f"{segment_offset + 3}. Edit Segment",
+                f"{segment_offset + 4}. Delete Segment",
+                f"{segment_offset + 5}. Generate Voice-Overs",
+                "\n[bold yellow]Export:[/bold yellow]",
+                f"{segment_offset + 6}. Export Video",
+                "\n[bold yellow]Project:[/bold yellow]",
+                f"{segment_offset + 7}. Project Settings",
+                f"{segment_offset + 8}. Save Project",
+                f"{segment_offset + 9}. Back to Main Menu"
+            ])
+
+            for option in menu_options:
+                console.print(option)
+
+            max_choice = segment_offset + 9
+            choice = Prompt.ask("Select option", choices=[str(i) for i in range(1, max_choice + 1)])
+            choice_num = int(choice)
+
+            # Handle video management options
+            if len(self.project.videos) > 1:
+                # Multi-video project menu
+                if choice_num == 1:
+                    self.select_active_video()
+                elif choice_num == 2:
+                    await self.add_videos_to_project()
+                elif choice_num == 3:
+                    self.remove_video()
+                elif choice_num == 4:
+                    self.reorder_videos()
+                elif choice_num == 5:
+                    self.show_all_videos()
+                elif choice_num == segment_offset + 1:
+                    await self.add_segment()
+                elif choice_num == segment_offset + 2:
+                    self.list_segments()
+                elif choice_num == segment_offset + 3:
+                    await self.edit_segment()
+                elif choice_num == segment_offset + 4:
+                    self.delete_segment()
+                elif choice_num == segment_offset + 5:
+                    await self.generate_voiceovers()
+                elif choice_num == segment_offset + 6:
+                    await self.export_video()
+                elif choice_num == segment_offset + 7:
+                    self.project_settings()
+                elif choice_num == segment_offset + 8:
+                    self.project.save()
+                    console.print("[green]✓ Project saved[/green]")
+                elif choice_num == segment_offset + 9:
+                    self.project.save()
+                    break
+            else:
+                # Single video project menu (with Add More Videos option)
+                if choice_num == 1:
+                    await self.add_videos_to_project()
+                elif choice_num == segment_offset + 1:
+                    await self.add_segment()
+                elif choice_num == segment_offset + 2:
+                    self.list_segments()
+                elif choice_num == segment_offset + 3:
+                    await self.edit_segment()
+                elif choice_num == segment_offset + 4:
+                    self.delete_segment()
+                elif choice_num == segment_offset + 5:
+                    await self.generate_voiceovers()
+                elif choice_num == segment_offset + 6:
+                    await self.export_video()
+                elif choice_num == segment_offset + 7:
+                    self.project_settings()
+                elif choice_num == segment_offset + 8:
+                    self.project.save()
+                    console.print("[green]✓ Project saved[/green]")
+                elif choice_num == segment_offset + 9:
+                    self.project.save()
+                    break
 
     async def _select_voice_for_language(self, language: str) -> str:
         """
@@ -269,12 +532,18 @@ class ConsoleEditor:
             font_input = input("Font: ").strip()
 
             if font_input:
-                font = get_font_from_input_with_install(font_input, current_font or "Roboto")
+                # When user provides input, use it (with fallback to Roboto if download fails)
+                font = get_font_from_input_with_install(font_input, "Roboto")
                 console.print(f"[green]✓ Using font: {font}[/green]")
             else:
-                font = current_font or "Roboto"
+                # User pressed Enter without input - use current font or default to Roboto
+                font = current_font if current_font else "Roboto"
+                console.print(f"[dim]Using: {font}[/dim]")
         else:
-            font = current_font or "Roboto"
+            # User chose not to use custom font
+            # Use current_font if editing an existing segment, otherwise default to Roboto
+            font = current_font if current_font else "Roboto"
+            console.print(f"[dim]Using font: {font}[/dim]")
 
         # Size
         size = IntPrompt.ask("Font size", default=20)
@@ -318,7 +587,7 @@ class ConsoleEditor:
 
             # Outline width
             from rich.prompt import FloatPrompt
-            outline_width = FloatPrompt.ask("Outline/border width (pixels)", default=2.0)
+            outline_width = FloatPrompt.ask("Outline/border width (pixels)", default=0.5)
 
             # Outline color
             console.print("\n[cyan]Outline/Border Color:[/cyan]")
@@ -468,18 +737,24 @@ class ConsoleEditor:
 
             # Subtitle styling
             if Confirm.ask("Configure subtitle styling?", default=False):
-                styling = self._get_subtitle_styling_options()
+                # User wants to configure - pass None as current_font to start fresh
+                styling = self._get_subtitle_styling_options(current_font=None)
             else:
                 from backend.subtitle_utils import SubtitleUtils
-                # Use language-specific default font with default border
+                # Use language-specific default font with subtle border
+                # Each new segment gets fresh default styling based on its language
+                # This ensures fonts don't persist from previous segments
+                default_font = SubtitleUtils.get_language_specific_font(language)
+                console.print(f"[dim]Using default font for {language}: {default_font}[/dim]")
+
                 styling = {
-                    'font': SubtitleUtils.get_language_specific_font(language),
+                    'font': default_font,
                     'size': 20,
                     'color': "&H00FFFFFF",
                     'position': 30,
                     'border_enabled': True,
                     'border_style': 1,
-                    'outline_width': 2.0,
+                    'outline_width': 0.5,  # Reduced for subtler border
                     'outline_color': "&H00000000",
                     'shadow': 0.0
                 }
@@ -507,7 +782,7 @@ class ConsoleEditor:
             # Set border styling
             segment.subtitle_border_enabled = styling.get('border_enabled', True)
             segment.subtitle_border_style = styling.get('border_style', 1)
-            segment.subtitle_outline_width = styling.get('outline_width', 2.0)
+            segment.subtitle_outline_width = styling.get('outline_width', 0.5)  # Reduced default
             segment.subtitle_outline_color = styling.get('outline_color', "&H00000000")
             segment.subtitle_shadow = styling.get('shadow', 0.0)
 
@@ -985,7 +1260,7 @@ class ConsoleEditor:
             # Update border styling
             segment.subtitle_border_enabled = styling.get('border_enabled', True)
             segment.subtitle_border_style = styling.get('border_style', 1)
-            segment.subtitle_outline_width = styling.get('outline_width', 2.0)
+            segment.subtitle_outline_width = styling.get('outline_width', 0.5)  # Reduced default
             segment.subtitle_outline_color = styling.get('outline_color', "&H00000000")
             segment.subtitle_shadow = styling.get('shadow', 0.0)
 
@@ -1091,6 +1366,16 @@ class ConsoleEditor:
     async def generate_segment_audio(self, segment):
         """Generate audio for a single segment"""
         try:
+            # Get video orientation for subtitle chunking
+            active_video = self.project.get_active_video()
+            orientation = active_video.orientation if active_video and active_video.orientation else 'horizontal'
+
+            # If segment has video_id, use that video's orientation
+            if hasattr(segment, 'video_id') and segment.video_id:
+                segment_video = self.project.get_video(segment.video_id)
+                if segment_video and segment_video.orientation:
+                    orientation = segment_video.orientation
+
             with console.status(f"[bold green]Generating audio for '{segment.name}'..."):
                 audio_path, subtitle_path = await self.tts_service.generate_audio(
                     text=segment.text,
@@ -1100,7 +1385,8 @@ class ConsoleEditor:
                     segment_name=segment.name.replace(" ", "_"),
                     rate=segment.rate,
                     volume=segment.volume,
-                    pitch=segment.pitch
+                    pitch=segment.pitch,
+                    orientation=orientation
                 )
 
                 segment.audio_path = audio_path
@@ -1138,6 +1424,10 @@ class ConsoleEditor:
             return
 
         # Generate audio for all segments
+        # Get video orientation for subtitle chunking
+        active_video = self.project.get_active_video()
+        default_orientation = active_video.orientation if active_video and active_video.orientation else 'horizontal'
+
         with suppress_console_logs():
             with Progress(
                 SpinnerColumn(),
@@ -1152,6 +1442,13 @@ class ConsoleEditor:
                     try:
                         progress.update(task, description=f"Generating: {segment.name}")
 
+                        # Determine orientation for this segment
+                        orientation = default_orientation
+                        if hasattr(segment, 'video_id') and segment.video_id:
+                            segment_video = self.project.get_video(segment.video_id)
+                            if segment_video and segment_video.orientation:
+                                orientation = segment_video.orientation
+
                         audio_path, subtitle_path = await self.tts_service.generate_audio(
                             text=segment.text,
                             language=segment.language,
@@ -1160,7 +1457,8 @@ class ConsoleEditor:
                             segment_name=segment.name.replace(" ", "_"),
                             rate=segment.rate,
                             volume=segment.volume,
-                            pitch=segment.pitch
+                            pitch=segment.pitch,
+                            orientation=orientation
                         )
 
                         segment.audio_path = audio_path
@@ -1173,12 +1471,200 @@ class ConsoleEditor:
 
         console.print("[green]✓ Voice-over generation complete[/green]")
 
+    # ===== VIDEO MANAGEMENT METHODS (Multi-Video Support) =====
+
+    def select_active_video(self):
+        """Select which video to edit"""
+        console.print("\n[bold green]Select Active Video[/bold green]")
+
+        table = Table(title="Videos in Project")
+        table.add_column("No.", style="cyan")
+        table.add_column("Active", style="green")
+        table.add_column("Name", style="white")
+        table.add_column("Duration", style="yellow")
+        table.add_column("Segments", style="magenta")
+        table.add_column("Orientation", style="blue")
+
+        for idx, video in enumerate(sorted(self.project.videos, key=lambda v: v.order), 1):
+            info = video.get_display_info()
+            is_active = "✓" if video.id == self.project.active_video_id else ""
+            table.add_row(
+                str(idx),
+                is_active,
+                video.name,
+                info['duration'],
+                str(info['segments']),
+                f"{info['orientation_icon']} {info['orientation']}"
+            )
+
+        console.print(table)
+
+        choice = IntPrompt.ask("Select video number (0 to cancel)", default=1)
+        if choice > 0 and choice <= len(self.project.videos):
+            selected_video = sorted(self.project.videos, key=lambda v: v.order)[choice - 1]
+            self.project.set_active_video(selected_video.id)
+            console.print(f"[green]✓ Active video set to: {selected_video.name}[/green]")
+
+    async def add_videos_to_project(self):
+        """Add more videos to existing project"""
+        console.print("\n[bold green]Add Videos to Project[/bold green]")
+
+        # Use file picker
+        video_paths = pick_video_files()
+
+        if not video_paths:
+            console.print("[yellow]No videos selected[/yellow]")
+            return
+
+        # Add each video
+        for video_path in video_paths:
+            try:
+                video_name = Path(video_path).stem
+                video = self.project.add_video(video_path, name=video_name)
+                console.print(f"[green]✓ Added: {video_name}[/green]")
+            except Exception as e:
+                console.print(f"[red]Failed to add {Path(video_path).name}: {e}[/red]")
+
+        # Check compatibility
+        is_compatible, warnings = self.project.check_video_compatibility()
+        if warnings:
+            console.print("\n[yellow]⚠ Compatibility Warnings:[/yellow]")
+            for warning in warnings:
+                console.print(f"  [yellow]• {warning}[/yellow]")
+
+        self.project.save()
+
+    def remove_video(self):
+        """Remove a video from project"""
+        if len(self.project.videos) <= 1:
+            console.print("[yellow]Cannot remove the only video in project[/yellow]")
+            return
+
+        console.print("\n[bold green]Remove Video[/bold green]")
+
+        table = Table()
+        table.add_column("No.", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Segments", style="yellow")
+
+        for idx, video in enumerate(sorted(self.project.videos, key=lambda v: v.order), 1):
+            table.add_row(str(idx), video.name, str(len(video.timeline.segments)))
+
+        console.print(table)
+
+        choice = IntPrompt.ask("Select video to remove (0 to cancel)", default=0)
+        if choice > 0 and choice <= len(self.project.videos):
+            selected_video = sorted(self.project.videos, key=lambda v: v.order)[choice - 1]
+
+            # Confirm if video has segments
+            if selected_video.timeline.segments:
+                confirm = Confirm.ask(
+                    f"[yellow]Video '{selected_video.name}' has {len(selected_video.timeline.segments)} segment(s). Remove anyway?[/yellow]",
+                    default=False
+                )
+                if not confirm:
+                    return
+
+            self.project.remove_video(selected_video.id)
+            console.print(f"[green]✓ Removed: {selected_video.name}[/green]")
+            self.project.save()
+
+    def reorder_videos(self):
+        """Reorder videos in project"""
+        console.print("\n[bold green]Reorder Videos[/bold green]")
+        console.print("[dim]Enter new order as comma-separated numbers (e.g., '2,1,3')[/dim]\n")
+
+        # Show current order
+        table = Table(title="Current Order")
+        table.add_column("Position", style="cyan")
+        table.add_column("Name", style="white")
+
+        for idx, video in enumerate(sorted(self.project.videos, key=lambda v: v.order), 1):
+            table.add_row(str(idx), video.name)
+
+        console.print(table)
+
+        # Get new order
+        order_input = Prompt.ask("Enter new order (comma-separated)", default="")
+
+        if not order_input:
+            return
+
+        try:
+            new_positions = [int(x.strip()) for x in order_input.split(',')]
+
+            if len(new_positions) != len(self.project.videos):
+                console.print(f"[red]Error: Expected {len(self.project.videos)} positions[/red]")
+                return
+
+            if set(new_positions) != set(range(1, len(self.project.videos) + 1)):
+                console.print("[red]Error: Invalid positions (must use each number once)[/red]")
+                return
+
+            # Create new order mapping
+            sorted_videos = sorted(self.project.videos, key=lambda v: v.order)
+            new_order = [sorted_videos[pos - 1].id for pos in new_positions]
+
+            self.project.reorder_videos(new_order)
+            console.print("[green]✓ Videos reordered successfully[/green]")
+            self.project.save()
+
+        except ValueError:
+            console.print("[red]Error: Invalid input[/red]")
+
+    def show_all_videos(self):
+        """Display detailed information about all videos"""
+        console.print("\n[bold green]All Videos in Project[/bold green]")
+
+        for video in sorted(self.project.videos, key=lambda v: v.order):
+            info = video.get_display_info()
+
+            panel_content = f"""[cyan]Order:[/cyan] {video.order}
+[cyan]Duration:[/cyan] {info['duration']}
+[cyan]Resolution:[/cyan] {info['resolution']}
+[cyan]Orientation:[/cyan] {info['orientation_icon']} {info['orientation']}
+[cyan]Codec:[/cyan] {info['codec']}
+[cyan]Segments:[/cyan] {info['segments']}
+[cyan]Path:[/cyan] {video.path}"""
+
+            console.print(Panel(panel_content, title=f"[bold]{video.name}[/bold]", border_style="blue"))
+
+    # ===== END VIDEO MANAGEMENT METHODS =====
+
     async def export_video(self):
-        """Export the final video"""
+        """Export video(s) with multi-video support"""
         console.print("\n[bold green]Export Video[/bold green]")
 
+        # For multi-video projects, show export options
+        if len(self.project.videos) > 1:
+            console.print("\n[yellow]Export Options:[/yellow]")
+            console.print("1. Export active video only")
+            console.print("2. Export all videos individually")
+            console.print("3. Export combined video (all videos in order)")
+
+            export_choice = Prompt.ask("Select export type", choices=["1", "2", "3"], default="3")
+
+            if export_choice == "1":
+                await self._export_single_video()
+            elif export_choice == "2":
+                await self._export_all_videos_individually()
+            elif export_choice == "3":
+                await self._export_combined_video()
+        else:
+            # Single video project - use standard export
+            await self._export_single_video()
+
+    async def _export_single_video(self):
+        """Export single/active video"""
+        active_video = self.project.get_active_video()
+        if not active_video:
+            console.print("[red]No active video[/red]")
+            return
+
+        console.print(f"\n[cyan]Exporting: {active_video.name}[/cyan]")
+
         # Validate timeline
-        errors = self.project.timeline.validate_timeline()
+        errors = active_video.timeline.validate_timeline()
         if errors:
             console.print("[red]Timeline validation errors:[/red]")
             for error in errors:
@@ -1188,7 +1674,8 @@ class ConsoleEditor:
                 return
 
         # Get export settings
-        output_path = Prompt.ask("Output file path", default=f"{self.project.name}_output.mp4")
+        default_name = f"{self.project.name}_{active_video.name}.mp4" if len(self.project.videos) > 1 else f"{self.project.name}_output.mp4"
+        output_path = Prompt.ask("Output file path", default=default_name)
 
         console.print("\nQuality presets:")
         console.print("1. Lossless (best quality, largest file)")
@@ -1203,7 +1690,7 @@ class ConsoleEditor:
 
         background_music = None
         if Confirm.ask("Add background music?", default=False):
-            background_music = Prompt.ask("Background music file path")
+            background_music = self.sanitize_path(Prompt.ask("Background music file path"))
             if not Path(background_music).exists():
                 console.print("[yellow]Warning: Background music file not found[/yellow]")
                 background_music = None
@@ -1227,13 +1714,25 @@ class ConsoleEditor:
                     def progress_callback(message: str, percent: int):
                         progress.update(task, description=message, completed=percent)
 
-                    success = await pipeline.export(
-                        output_path=output_path,
-                        quality=quality,
-                        include_subtitles=include_subtitles,
-                        background_music_path=background_music,
-                        progress_callback=progress_callback
-                    )
+                    # For multi-video projects, use export_single_video method
+                    if len(self.project.videos) > 1:
+                        success = await pipeline.export_single_video(
+                            video=active_video,
+                            output_path=output_path,
+                            quality=quality,
+                            include_subtitles=include_subtitles,
+                            background_music_path=background_music,
+                            progress_callback=progress_callback
+                        )
+                    else:
+                        # Single video project - use standard export
+                        success = await pipeline.export(
+                            output_path=output_path,
+                            quality=quality,
+                            include_subtitles=include_subtitles,
+                            background_music_path=background_music,
+                            progress_callback=progress_callback
+                        )
 
             if success:
                 console.print(f"\n[green]✓ Export complete: {output_path}[/green]")
@@ -1244,6 +1743,156 @@ class ConsoleEditor:
                     console.print(f"  File size: {size_mb:.1f} MB")
             else:
                 console.print("[red]✗ Export failed[/red]")
+
+        except Exception as e:
+            console.print(f"[red]Export error: {e}[/red]")
+            logger.error(f"Export error: {e}")
+
+    async def _export_all_videos_individually(self):
+        """Export each video separately"""
+        console.print(f"\n[cyan]Exporting {len(self.project.videos)} videos individually...[/cyan]")
+
+        # Get export settings (same for all)
+        console.print("\nQuality presets:")
+        console.print("1. Lossless (best quality, largest file)")
+        console.print("2. High (near-lossless)")
+        console.print("3. Balanced (good quality, smaller file)")
+
+        quality_choice = Prompt.ask("Quality", choices=["1", "2", "3"], default="3")
+        quality_map = {"1": "lossless", "2": "high", "3": "balanced"}
+        quality = quality_map[quality_choice]
+
+        include_subtitles = Confirm.ask("Include subtitles?", default=True)
+
+        pipeline = ExportPipeline(self.project)
+
+        # Export each video
+        for idx, video in enumerate(sorted(self.project.videos, key=lambda v: v.order), 1):
+            output_path = f"{self.project.name}_{video.name}.mp4"
+            console.print(f"\n[bold]Exporting {idx}/{len(self.project.videos)}: {video.name}[/bold]")
+
+            try:
+                success = await pipeline.export_single_video(
+                    video,
+                    output_path,
+                    quality,
+                    include_subtitles
+                )
+
+                if success:
+                    size_mb = Path(output_path).stat().st_size / 1024 / 1024
+                    console.print(f"[green]✓ {video.name}: {size_mb:.1f} MB[/green]")
+                else:
+                    console.print(f"[red]✗ Failed: {video.name}[/red]")
+
+            except Exception as e:
+                console.print(f"[red]Error exporting {video.name}: {e}[/red]")
+
+        console.print("\n[green]✓ All exports complete[/green]")
+
+    async def _export_combined_video(self):
+        """Export all videos combined in order"""
+        console.print(f"\n[cyan]Exporting combined video ({len(self.project.videos)} videos)...[/cyan]")
+
+        # Check compatibility
+        is_compatible, warnings = self.project.check_video_compatibility()
+        force_export = False
+
+        if not is_compatible:
+            console.print("\n[red]⚠ ERROR: Videos are not compatible for combination:[/red]")
+            for warning in warnings:
+                console.print(f"  [red]• {warning}[/red]")
+            console.print("\n[yellow]These videos have incompatible properties (e.g., different orientations).[/yellow]")
+            console.print("[yellow]Forcing export may result in:[/yellow]")
+            console.print("  • Quality loss")
+            console.print("  • Black bars or distortion")
+            console.print("  • Unexpected visual results\n")
+
+            console.print("[cyan]Options:[/cyan]")
+            console.print("1. Force export anyway (use FFmpeg scaling)")
+            console.print("2. Export videos individually instead")
+            console.print("3. Cancel")
+
+            option = Prompt.ask("Select option", choices=["1", "2", "3"], default="3")
+
+            if option == "1":
+                force_export = True
+                console.print("[yellow]⚠ Proceeding with forced export...[/yellow]")
+            elif option == "2":
+                console.print("\n[cyan]Switching to individual export...[/cyan]")
+                await self._export_all_videos_individually()
+                return
+            else:
+                console.print("[yellow]Export cancelled[/yellow]")
+                return
+
+        elif warnings:
+            console.print("\n[yellow]⚠ Compatibility Warnings:[/yellow]")
+            for warning in warnings:
+                console.print(f"  [yellow]• {warning}[/yellow]")
+
+            if not Confirm.ask("\nContinue with export?", default=True):
+                return
+
+        # Get export settings
+        output_path = Prompt.ask("Output file path", default=f"{self.project.name}_combined.mp4")
+
+        console.print("\nQuality presets:")
+        console.print("1. Lossless (best quality, largest file)")
+        console.print("2. High (near-lossless)")
+        console.print("3. Balanced (good quality, smaller file)")
+
+        quality_choice = Prompt.ask("Quality", choices=["1", "2", "3"], default="3")
+        quality_map = {"1": "lossless", "2": "high", "3": "balanced"}
+        quality = quality_map[quality_choice]
+
+        include_subtitles = Confirm.ask("Include subtitles?", default=True)
+
+        background_music = None
+        if Confirm.ask("Add background music to combined video?", default=False):
+            background_music = self.sanitize_path(Prompt.ask("Background music file path"))
+            if not Path(background_music).exists():
+                console.print("[yellow]Warning: Background music file not found[/yellow]")
+                background_music = None
+
+        # Start export
+        console.print("\n[bold]Starting combined export...[/bold]")
+        console.print("[dim]This may take a while for multiple videos...[/dim]\n")
+
+        pipeline = ExportPipeline(self.project)
+
+        try:
+            with suppress_console_logs():
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    console=console
+                ) as progress:
+                    task = progress.add_task("Exporting...", total=100)
+
+                    def progress_callback(message: str, percent: int):
+                        progress.update(task, description=message, completed=percent)
+
+                    success = await pipeline.export_combined_videos(
+                        output_path=output_path,
+                        quality=quality,
+                        include_subtitles=include_subtitles,
+                        background_music_path=background_music,
+                        progress_callback=progress_callback,
+                        force_export=force_export
+                    )
+
+            if success:
+                console.print(f"\n[green]✓ Combined export complete: {output_path}[/green]")
+
+                # Show file info
+                if Path(output_path).exists():
+                    size_mb = Path(output_path).stat().st_size / 1024 / 1024
+                    console.print(f"  File size: {size_mb:.1f} MB")
+            else:
+                console.print("[red]✗ Combined export failed[/red]")
 
         except Exception as e:
             console.print(f"[red]Export error: {e}[/red]")
@@ -1271,7 +1920,7 @@ class ConsoleEditor:
             )
 
             if Confirm.ask("Set background music?", default=False):
-                music_path = Prompt.ask("Background music file path")
+                music_path = self.sanitize_path(Prompt.ask("Background music file path"))
                 if Path(music_path).exists():
                     self.project.background_music_path = music_path
                 else:
@@ -1294,6 +1943,8 @@ class ConsoleEditor:
                 elif choice == "3":
                     self.list_projects()
                 elif choice == "4":
+                    self.delete_project()
+                elif choice == "5":
                     console.print("\n[cyan]Thank you for using TermiVoxed![/cyan]")
                     break
 

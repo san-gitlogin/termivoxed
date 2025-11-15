@@ -117,7 +117,7 @@ class SubtitleUtils:
             'spacing': '0',
             'angle': '0',
             'borderstyle': '1',
-            'outline': '1',
+            'outline': '0.5',  # Reduced from 1 to 0.5 for thinner border
             'shadow': '0',
             'alignment': '2',  # Bottom center
             'marginl': '10',
@@ -192,7 +192,7 @@ class SubtitleUtils:
             'spacing': '0',
             'angle': '0',
             'borderstyle': '1',
-            'outline': '1',
+            'outline': '0.5',  # Reduced from 1 to 0.5 for thinner border
             'shadow': '0',
             'alignment': '2',  # Bottom center
             'marginl': '10',

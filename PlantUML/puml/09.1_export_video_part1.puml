@@ -1,5 +1,5 @@
-@startuml 09_Export_Video
-title Flow 9: Export Video (Complete Pipeline)
+@startuml 09.1_Export_Video_Part1
+title Flow 9.1: Export Video - Part 1 (Setup & Segment Processing)
 autonumber
 
 ' Participants
@@ -15,11 +15,30 @@ participant "FFmpeg Binary" as FFmpegBin
 participant "FFprobe Binary" as FFprobeBin
 database "File System" as FileSystem
 
-== Export Video ==
+== Export Video - Setup & Processing ==
 
 Main -> User: Display: [bold green]Export Video[/bold green]
 
-' Validate timeline
+' Multi-video export options (NEW)
+alt Project has multiple videos
+    Main -> User: Display export options:\n1. Export active video only\n2. Export all videos individually\n3. Export combined video (all videos in order)
+    User --> Main: export_choice = "3" (combined)
+
+    alt export_choice = "3" (Combined)
+        Main -> Main: Call _export_combined_video()
+        note right: See "Export Combined Video" section
+    else export_choice = "2" (All individually)
+        Main -> Main: Call _export_all_videos_individually()
+        note right: Loops through all videos
+    else export_choice = "1" (Active only)
+        Main -> Main: Call _export_single_video()
+        note right: Standard export flow
+    end
+else Single video project
+    Main -> Main: Use standard export()
+end
+
+' Validate timeline (for active video or single video)
 Main -> Timeline: validate_timeline()
 activate Timeline
 Timeline -> Timeline: errors = []
@@ -201,122 +220,22 @@ alt current_time < video_duration
     Export -> Export: all_parts.append(part_path)
 end
 
-' Step 3: Concatenate all parts
-Export -> User: Progress: Combining video segments... (70%)
-
-Export -> Export: combined_path = temp/combined_{project_name}.mp4
-Export -> FFmpeg: concatenate_videos(all_parts, combined_path)
-activate FFmpeg
-
-FFmpeg -> FileSystem: Write concat file:\ntemp/concat_list.txt:\nfile '/abs/path/part_before_0.mp4'\nfile '/abs/path/segment_0_processed.mp4'\nfile '/abs/path/part_before_1.mp4'\n...
-
-FFmpeg -> FFmpegBin: ffmpeg -f concat -safe 0\n-i {concat_file}\n-c copy -y {output}
-FFmpegBin -> FFmpegBin: Concatenate all parts\nwithout re-encoding
-FFmpegBin --> FFmpeg: Success
-FFmpeg --> Export: Success
-deactivate FFmpeg
-
-' Step 4: Add background music (optional)
-alt background_music_path exists
-    Export -> User: Progress: Adding background music... (90%)
-    Export -> FFmpeg: add_background_music(\n  combined_path, music_path, output_path\n)
-    activate FFmpeg
-    FFmpeg -> FFprobe: get_media_duration(video_path)
-    FFprobe --> FFmpeg: video_dur
-    FFmpeg -> FFprobe: get_media_duration(music_path)
-    FFprobe --> FFmpeg: music_dur
-
-    FFmpeg -> FFmpeg: Calculate loops needed:\nloops = int(video_dur / music_dur) + 1
-
-    FFmpeg -> FFmpeg: Build filter:\n[0:a]volume=+3dB[boosted];\n[1:a]aloop=loop={loops}:size={samples},\nvolume=-16dB,\nafade=t=out:st={video_dur-3}:d=3,\natrim=duration={video_dur}[bg];\n[boosted][bg]amix=inputs=2:\nduration=first[aout]
-
-    FFmpeg -> FFmpegBin: ffmpeg -i {video} -i {music}\n-filter_complex "{filter}"\n-map 0:v -map [aout]\n-c:v copy -c:a aac -y {output}
-    FFmpegBin --> FFmpeg: Success
-    FFmpeg --> Export: Success
-    deactivate FFmpeg
-else no background music
-    Export -> FileSystem: shutil.copy(combined_path, output_path)
-end
-
-Export -> User: Progress: Export complete! (100%)
-
-' Cleanup
-Export -> Export: _cleanup_temp_files(all_parts, combined_path)
-loop For each temp file
-    Export -> FileSystem: os.unlink(file_path)
-end
-
-Export --> Main: Success
-deactivate Export
-
-Main -> FileSystem: Get file size: Path(output_path).stat().st_size
-FileSystem --> Main: size_bytes
-Main -> Main: size_mb = size_bytes / 1024 / 1024
-Main -> User: [green]✓ Export complete: MyProject_output.mp4[/green]\nFile size: 245.3 MB
-
 note over User, FileSystem
-  **Technical Details:**
+  **Part 1 Complete**
 
-  **Export Pipeline Stages:**
-  1. Timeline validation (overlaps, missing audio)
-  2. Font availability check (download if needed)
-  3. TTS audio generation (for missing segments)
-  4. Audio length validation (auto-extend segments)
-  5. Video segment processing (extract + process + gaps)
-  6. Concatenation (all parts into single video)
-  7. Background music (optional, with looping/fade)
-  8. Cleanup (temp files)
+  All video segments have been processed with:
+  - TTS audio generation (cached or new)
+  - Subtitle styling (ASS format)
+  - Audio mixing (original + TTS)
+  - Gaps between segments extracted
 
-  **FFmpeg Operations:**
-  - extract_video_segment: Fast stream copy or re-encode
-  - process_segment_video: Audio mix + subtitle burn + encode
-  - concatenate_videos: Concat demuxer (-c copy)
-  - add_background_music: Audio filters (aloop, afade, amix)
+  **Next: Part 2**
+  - Video concatenation
+  - Background music addition
+  - Cleanup
+  - Export completion
 
-  **Video Segment Strategy:**
-  - Preserves full original video
-  - Only segments with voice-overs are processed
-  - Gaps between segments: fast stream copy
-  - Processed segments: audio mix + subtitle overlay
-  - Final: concatenate all parts seamlessly
-
-  **Audio Mixing:**
-  - amix filter: inputs=2, duration=first
-  - TTS boost: +3dB (configurable)
-  - BGM reduction: -16dB (configurable)
-  - Auto-handles different durations
-
-  **Subtitle Processing:**
-  - SRT → ASS conversion (ffmpeg)
-  - Custom style application (ASS format)
-  - Font embedding via system fonts
-  - Border/outline/shadow support
-  - Burned into video (not soft subs)
-
-  **Quality Presets:**
-  - Lossless: CRF 0, preset medium
-  - High: CRF 18, preset medium
-  - Balanced: CRF 23, preset medium
-  - Codec: libx264 (H.264)
-  - Audio: AAC
-
-  **File Paths:**
-  - Temp: storage/temp/part_*.mp4, segment_*_processed.mp4
-  - Combined: storage/temp/combined_{name}.mp4
-  - Output: User-specified path
-  - Concat list: storage/temp/concat_list.txt
-
-  **Error Handling:**
-  - FFmpeg timeout: 300s per segment
-  - Missing audio: Validation before export
-  - Font installation failures: Fallback to system default
-  - Segment processing failures: Logged, export continues
-
-  **Performance:**
-  - Sequential processing (not parallel)
-  - Stream copy for unchanged parts (fast)
-  - Re-encoding only for processed segments
-  - Cleanup temp files after export
+  See diagram: 09.2_export_video_part2.puml
 end note
 
 @enduml
