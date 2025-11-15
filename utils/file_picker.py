@@ -66,6 +66,182 @@ class FilePicker:
             console.print(f"[red]Permission denied: {self.current_path}[/red]")
             return [], []
 
+    def search_files_and_folders(self, search_term: str, max_depth: int = 5) -> tuple[List[Path], List[Path]]:
+        """
+        Recursively search for folders and video files matching the search term
+
+        Args:
+            search_term: Search string to match against folder/file names (case-insensitive)
+            max_depth: Maximum depth to search (default: 5 levels deep)
+
+        Returns:
+            Tuple of (matching_directories, matching_video_files)
+        """
+        matching_dirs = []
+        matching_videos = []
+        search_lower = search_term.lower()
+
+        def search_recursive(path: Path, current_depth: int):
+            if current_depth > max_depth:
+                return
+
+            try:
+                for item in path.iterdir():
+                    # Skip hidden files/folders
+                    if item.name.startswith('.'):
+                        continue
+
+                    try:
+                        # Check if name matches search term
+                        if search_lower in item.name.lower():
+                            if item.is_dir():
+                                matching_dirs.append(item)
+                            elif self.is_video_file(item):
+                                matching_videos.append(item)
+
+                        # Recurse into directories
+                        if item.is_dir():
+                            search_recursive(item, current_depth + 1)
+
+                    except (PermissionError, OSError):
+                        # Skip items we can't access
+                        continue
+
+            except (PermissionError, OSError):
+                # Skip directories we can't access
+                pass
+
+        # Start search from current path
+        search_recursive(self.current_path, 0)
+
+        # Sort results alphabetically
+        matching_dirs.sort(key=lambda x: x.name.lower())
+        matching_videos.sort(key=lambda x: x.name.lower())
+
+        return matching_dirs, matching_videos
+
+    def _handle_search(self) -> Optional[List[str]]:
+        """
+        Handle search functionality - prompt user for search term and display results
+
+        Returns:
+            List of selected file paths or None to return to navigation
+        """
+        console.print("\n[bold cyan]🔍 Search for Folders and Video Files[/bold cyan]")
+        console.print(f"[dim]Searching from: {self.current_path}[/dim]")
+        console.print(f"[dim]Search depth: 5 levels (subdirectories)[/dim]\n")
+
+        search_term = Prompt.ask("[yellow]Enter search term (folder or file name)[/yellow]", default="")
+
+        if not search_term or search_term.strip() == "":
+            console.print("[yellow]Search cancelled[/yellow]")
+            return None
+
+        console.print(f"\n[cyan]Searching for '{search_term}'...[/cyan]")
+
+        matching_dirs, matching_videos = self.search_files_and_folders(search_term.strip())
+
+        if not matching_dirs and not matching_videos:
+            console.print(f"[yellow]No results found for '{search_term}'[/yellow]")
+            console.print("[dim]Press Enter to continue...[/dim]")
+            input()
+            return None
+
+        # Display search results summary
+        console.print(f"\n[green]✓ Found {len(matching_dirs)} folder(s) and {len(matching_videos)} video(s)[/green]\n")
+
+        # Build choices for search results
+        choices = []
+
+        # Add option to go back
+        choices.append(('← Back to Navigation', 'BACK'))
+        choices.append(('─' * 60, None))
+
+        # Add matching directories
+        if matching_dirs:
+            choices.append(('[bold]📁 MATCHING FOLDERS:[/bold]', None))
+            for directory in matching_dirs[:200]:  # Limit to 200 for performance
+                relative_path = directory.relative_to(self.current_path) if directory.is_relative_to(self.current_path) else directory
+                choices.append((f'📁 {directory.name}/ → {relative_path.parent}', ('DIR', str(directory))))
+
+        # Add separator if both types exist
+        if matching_dirs and matching_videos:
+            choices.append(('─' * 60, None))
+
+        # Add matching video files
+        if matching_videos:
+            choices.append(('[bold]🎬 MATCHING VIDEO FILES:[/bold]', None))
+            for video in matching_videos[:200]:  # Limit to 200 for performance
+                size_mb = video.stat().st_size / (1024 * 1024)
+                relative_path = video.relative_to(self.current_path) if video.is_relative_to(self.current_path) else video
+                choices.append((
+                    f'🎬 {video.name} ({size_mb:.1f} MB) → {relative_path.parent}',
+                    ('VIDEO', str(video))
+                ))
+
+        # Show selection menu
+        questions = [
+            inquirer.List(
+                'choice',
+                message='Select a folder to navigate to, or video to select',
+                choices=choices,
+                carousel=True
+            )
+        ]
+
+        try:
+            answer = inquirer.prompt(questions, theme=themes.GreenPassion())
+
+            if not answer or answer['choice'] == 'BACK' or answer['choice'] is None:
+                return None
+
+            choice_type, choice_path = answer['choice']
+
+            if choice_type == 'DIR':
+                # Navigate to selected directory
+                self.current_path = Path(choice_path)
+                console.print(f"\n[green]Navigated to: {self.current_path}[/green]")
+                return None  # Return to main navigation
+
+            elif choice_type == 'VIDEO':
+                # Ask if user wants to select just this video or browse the folder
+                video_path = Path(choice_path)
+                folder_path = video_path.parent
+
+                confirm_choices = [
+                    ('Select this video only', 'SELECT_ONE'),
+                    ('Browse folder to select multiple videos', 'BROWSE_FOLDER'),
+                    ('Back to search results', 'BACK')
+                ]
+
+                confirm_q = [
+                    inquirer.List(
+                        'action',
+                        message='What would you like to do?',
+                        choices=confirm_choices,
+                        carousel=True
+                    )
+                ]
+
+                confirm_answer = inquirer.prompt(confirm_q, theme=themes.GreenPassion())
+
+                if not confirm_answer or confirm_answer['action'] == 'BACK':
+                    return self._handle_search()  # Restart search
+
+                if confirm_answer['action'] == 'SELECT_ONE':
+                    return [str(video_path.absolute())]
+
+                elif confirm_answer['action'] == 'BROWSE_FOLDER':
+                    self.current_path = folder_path
+                    console.print(f"\n[green]Navigated to: {self.current_path}[/green]")
+                    return None  # Return to main navigation
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Search cancelled[/yellow]")
+            return None
+
+        return None
+
     def display_current_selection(self):
         """Display currently selected files"""
         if not self.selected_files:
@@ -88,6 +264,7 @@ class FilePicker:
             "[bold]Stage 2:[/bold] Multi-select videos with [yellow]Space[/yellow] key\n\n"
             "• Use [yellow]↑/↓[/yellow] arrow keys to navigate\n"
             "• Press [yellow]Enter[/yellow] to open directory or select folder\n"
+            "• Use [yellow]🔍 SEARCH[/yellow] to find folders/files by name\n"
             "• Press [yellow]Ctrl+C[/yellow] to cancel anytime",
             title="File Picker Guide",
             border_style="cyan"
@@ -114,7 +291,10 @@ class FilePicker:
                 ))
                 choices.append(('─' * 60, None))
 
-            # Add CANCEL option at the top as well
+            # Add SEARCH option prominently at the top
+            choices.append(('🔍 SEARCH for folders/files by name', 'SEARCH'))
+
+            # Add CANCEL option
             choices.append(('✗ CANCEL', 'CANCEL'))
             choices.append(('─' * 60, None))
 
@@ -122,8 +302,8 @@ class FilePicker:
             if self.current_path.parent != self.current_path:
                 choices.append(('📁 .. (Parent Directory)', '..'))
 
-            # Add directories
-            for directory in directories[:50]:  # Limit to first 50 directories
+            # Add directories (no limit - show all)
+            for directory in directories:
                 choices.append((f'📁 {directory.name}/', str(directory)))
 
             # Use inquirer for directory navigation
@@ -151,6 +331,14 @@ class FilePicker:
                 if choice == 'CANCEL':
                     console.print("\n[yellow]File selection cancelled[/yellow]")
                     return []
+
+                if choice == 'SEARCH':
+                    # Handle search functionality
+                    search_result = self._handle_search()
+                    if search_result:
+                        return search_result
+                    # If None, continue with navigation (user may have navigated to a folder)
+                    continue
 
                 if choice == 'SELECT_HERE':
                     # Proceed to Stage 2: Multi-select from current directory
@@ -187,10 +375,12 @@ class FilePicker:
         console.print(f"\n[bold green]Select Videos[/bold green]")
         console.print(f"[dim]Use Space to select/deselect, Enter to confirm[/dim]\n")
 
-        # Limit display if too many files
+        # Show info if many files, but allow all to be displayed
         if len(video_files) > 100:
-            console.print(f"[yellow]⚠ {len(video_files)} videos found. Showing first 100.[/yellow]")
-            video_files = video_files[:100]
+            console.print(f"[cyan]ℹ {len(video_files)} videos found in this folder.[/cyan]")
+            if len(video_files) > 1000:
+                console.print(f"[yellow]⚠ Large number of videos. Showing first 1000. Use search to find specific files.[/yellow]")
+                video_files = video_files[:1000]
 
         # Build checkbox choices
         choices = []
