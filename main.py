@@ -20,6 +20,7 @@ from core import ExportPipeline
 from backend.tts_service import TTSService
 from utils.logger import logger, suppress_console_logs
 from utils.file_picker import pick_video_files
+from config import settings
 
 console = Console()
 
