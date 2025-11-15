@@ -208,4 +208,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[1.0.0]: https://github.com/santhosht/termivoxed/releases/tag/v1.0.0
+[1.0.0]: https://github.com/san-gitlogin/termivoxed/releases/tag/v1.0.0

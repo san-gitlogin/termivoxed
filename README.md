@@ -95,7 +95,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/santhosht/termivoxed.git
+git clone https://github.com/san-gitlogin/termivoxed.git
 cd termivoxed
 
 # Run the setup script
@@ -110,7 +110,7 @@ chmod +x setup.sh
 
 ```batch
 REM Clone the repository
-git clone https://github.com/santhosht/termivoxed.git
+git clone https://github.com/san-gitlogin/termivoxed.git
 cd termivoxed
 
 REM Run the setup script
@@ -124,7 +124,7 @@ run.bat
 
 ```powershell
 # Clone the repository
-git clone https://github.com/santhosht/termivoxed.git
+git clone https://github.com/san-gitlogin/termivoxed.git
 cd termivoxed
 
 # Run the setup script
@@ -138,7 +138,7 @@ cd termivoxed
 
 ```bash
 # 1. Clone and navigate
-git clone https://github.com/santhosht/termivoxed.git
+git clone https://github.com/san-gitlogin/termivoxed.git
 cd termivoxed
 
 # 2. Create virtual environment
@@ -164,7 +164,7 @@ python main.py
 
 ```bash
 # Clone the repository
-git clone https://github.com/santhosht/termivoxed.git
+git clone https://github.com/san-gitlogin/termivoxed.git
 cd termivoxed
 
 # Build and run with Docker Compose
@@ -398,6 +398,6 @@ This project was developed with the assistance of **Claude** (Anthropic's AI ass
 
 **Made with ❤️ by Santhosh T**
 
-[Report Bug](https://github.com/santhosht/termivoxed/issues) · [Request Feature](https://github.com/santhosht/termivoxed/issues)
+[Report Bug](https://github.com/san-gitlogin/termivoxed/issues) · [Request Feature](https://github.com/san-gitlogin/termivoxed/issues)
 
 </div>

@@ -89,10 +89,10 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/santhosht/termivoxed"
-Repository = "https://github.com/santhosht/termivoxed"
-Documentation = "https://github.com/santhosht/termivoxed#readme"
-"Bug Tracker" = "https://github.com/santhosht/termivoxed/issues"
+Homepage = "https://github.com/san-gitlogin/termivoxed"
+Repository = "https://github.com/san-gitlogin/termivoxed"
+Documentation = "https://github.com/san-gitlogin/termivoxed#readme"
+"Bug Tracker" = "https://github.com/san-gitlogin/termivoxed/issues"
 
 [project.scripts]
 termivoxed = "main:main"

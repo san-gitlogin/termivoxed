@@ -32,11 +32,11 @@ setup(
     description="AI voice-over dubbing tool for content creators - Add professional voice-overs and styled subtitles without recording your own voice",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/santhosht/termivoxed",
+    url="https://github.com/san-gitlogin/termivoxed",
     project_urls={
-        "Bug Tracker": "https://github.com/santhosht/termivoxed/issues",
-        "Documentation": "https://github.com/santhosht/termivoxed#readme",
-        "Source Code": "https://github.com/santhosht/termivoxed",
+        "Bug Tracker": "https://github.com/san-gitlogin/termivoxed/issues",
+        "Documentation": "https://github.com/san-gitlogin/termivoxed#readme",
+        "Source Code": "https://github.com/san-gitlogin/termivoxed",
     },
     packages=find_packages(exclude=["tests", "tests.*", "docs", "examples"]),
     classifiers=[
