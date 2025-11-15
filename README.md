@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Terminal Based AI Voice-Over Dubbing Tool for Content Creators - Add professional AI voice-overs and styled subtitles to your videos without recording your own voice**
+**Terminal Based Video Voice-Over Dubbing Tool for Content Creators - Add professional AI voice-overs and styled subtitles to your videos**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
