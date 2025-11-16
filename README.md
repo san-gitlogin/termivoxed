@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="./assets/SVG/Horizontal_Logo.svg" alt="TermiVoxed Logo" width="600">
+
 **Terminal Based Video Voice-Over Dubbing Tool for Content Creators - Add professional AI voice-overs and styled subtitles to your videos**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)

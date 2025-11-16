@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 504.5 100.58">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: none;
+        stroke: #000;
+        stroke-miterlimit: 10;
+        stroke-width: 3px;
+      }
+
+      .cls-2 {
+        font-family: CascadiaMono-Regular, 'Cascadia Mono';
+        font-size: 60px;
+        font-variation-settings: 'wght' 400;
+      }
+
+      .cls-3, .cls-4 {
+        stroke-width: 0px;
+      }
+
+      .cls-5 {
+        font-family: PressStart2P-Regular, 'Press Start 2P';
+        font-size: 58.54px;
+      }
+
+      .cls-5, .cls-4 {
+        fill: #fff;
+      }
+    </style>
+  </defs>
+  <g id="Layer_1-2" data-name="Layer 1">
+    <rect class="cls-4" x="1.5" y="1.5" width="501.5" height="97" rx="12" ry="12"/>
+    <text class="cls-2" transform="translate(32.24 70.46)"><tspan x="0" y="0">termi</tspan></text>
+    <g>
+      <rect class="cls-3" x="238.14" y="1.36" width="265" height="97" rx="12" ry="12"/>
+      <text class="cls-5" transform="translate(265.42 78.68) scale(.72 1)"><tspan x="0" y="0">voxed</tspan></text>
+    </g>
+    <rect class="cls-1" x="1.5" y="1.5" width="501.5" height="97" rx="12" ry="12"/>
+  </g>
+</svg>
