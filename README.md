@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="./assets/SVG/Logo.svg" alt="TermiVoxed Logo" width="200">
+<img src="./assets/SVG/Logo.svg" alt="TermiVoxed Logo" width="100">
 
 **Terminal Based Video Voice-Over Dubbing Tool for Content Creators - Add professional AI voice-overs and styled subtitles to your videos**
 
