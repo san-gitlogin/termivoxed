@@ -4,8 +4,7 @@
 
 <img src="./assets/SVG/Logo.svg" alt="TermiVoxed Logo" width="100">
 
-**Terminal Based Video Voice-Over Dubbing Tool for Content Creators**
-**Add professional AI voice-overs and styled subtitles to your videos**
+**Terminal Based Video Voice-Over Dubbing Tool for Content Creators. Add professional AI voice-overs and styled subtitles to your videos with just few steps.**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
