@@ -57,6 +57,7 @@
 - **Docker Support**: Containerized deployment option
 - **Caching System**: TTS cache for faster repeated operations
 - **Project Versioning**: Backwards compatible with single-video projects
+- **Proxy Support**: Corporate proxy support for TTS service with automatic fallback (see [PROXY_SETUP.md](PROXY_SETUP.md))
 
 ---
 

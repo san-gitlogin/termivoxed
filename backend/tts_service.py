@@ -24,6 +24,16 @@ class TTSService:
         self.cache_file = Path(settings.CACHE_DIR) / "tts_cache.json"
         self.cache_mapping = self._load_cache()
 
+        # Proxy configuration
+        self.proxy_enabled = settings.TTS_PROXY_ENABLED
+        self.proxy_url = settings.TTS_PROXY_URL if self.proxy_enabled and settings.TTS_PROXY_URL else None
+
+        # Log proxy status
+        if self.proxy_enabled and self.proxy_url:
+            logger.info(f"🌐 TTS Proxy ENABLED: {self.proxy_url}")
+        else:
+            logger.info("🌐 TTS Proxy DISABLED: Direct connection to TTS service")
+
         # Best voices from existing system
         self.best_voices = {
             'en': 'en-US-AvaMultilingualNeural',
@@ -62,6 +72,72 @@ class TTSService:
                 json.dump(self.cache_mapping, f, indent=2)
         except Exception as e:
             logger.error(f"Could not save cache: {e}")
+
+    async def check_tts_connectivity(self) -> Dict[str, any]:
+        """
+        Check connectivity to TTS service with and without proxy
+        Returns status information about the connection
+        """
+        status = {
+            'proxy_enabled': self.proxy_enabled,
+            'proxy_url': self.proxy_url,
+            'direct_connection': False,
+            'proxy_connection': False,
+            'recommended_mode': 'unknown'
+        }
+
+        test_text = "Hello"
+        test_voice = "en-US-AvaMultilingualNeural"
+
+        # Test direct connection (without proxy)
+        try:
+            logger.info("🔍 Testing direct connection to TTS service...")
+            communicate = edge_tts.Communicate(
+                text=test_text,
+                voice=test_voice,
+                proxy=None
+            )
+            # Try to get first chunk to test connectivity
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    status['direct_connection'] = True
+                    logger.info("✅ Direct connection to TTS service: SUCCESS")
+                    break
+        except Exception as e:
+            logger.warning(f"❌ Direct connection to TTS service: FAILED - {str(e)[:100]}")
+            status['direct_connection'] = False
+
+        # Test proxy connection (if proxy is configured)
+        if self.proxy_enabled and self.proxy_url:
+            try:
+                logger.info(f"🔍 Testing proxy connection via {self.proxy_url}...")
+                communicate = edge_tts.Communicate(
+                    text=test_text,
+                    voice=test_voice,
+                    proxy=self.proxy_url
+                )
+                # Try to get first chunk to test connectivity
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        status['proxy_connection'] = True
+                        logger.info("✅ Proxy connection to TTS service: SUCCESS")
+                        break
+            except Exception as e:
+                logger.warning(f"❌ Proxy connection to TTS service: FAILED - {str(e)[:100]}")
+                status['proxy_connection'] = False
+
+        # Determine recommended mode
+        if status['direct_connection']:
+            status['recommended_mode'] = 'direct'
+            logger.info("💡 Recommendation: Use direct connection (no proxy needed)")
+        elif status['proxy_connection']:
+            status['recommended_mode'] = 'proxy'
+            logger.info("💡 Recommendation: Use proxy connection")
+        else:
+            status['recommended_mode'] = 'none'
+            logger.error("⚠️  WARNING: Cannot reach TTS service via direct or proxy connection!")
+
+        return status
 
     def _generate_cache_key(
         self,
@@ -373,87 +449,145 @@ class TTSService:
         """
         Generate both audio and subtitle files using edge-tts streaming
         Uses word-boundary timing data for precise subtitle synchronization
+        Supports proxy with automatic fallback to direct connection
         """
-        try:
-            # Create communication object
-            communicate = edge_tts.Communicate(
-                text=text,
-                voice=voice,
-                rate=rate,
-                volume=volume,
-                pitch=pitch
-            )
+        # Determine which connection method to try first and fallback
+        connection_attempts = []
 
-            # Create subtitle maker and collect word timing data
-            submaker = edge_tts.SubMaker()
-            word_timings = []  # Collect word boundary data for precise timing
+        if self.proxy_enabled and self.proxy_url:
+            # Try proxy first, then direct as fallback
+            connection_attempts = [
+                ('proxy', self.proxy_url),
+                ('direct', None)
+            ]
+            logger.info(f"🌐 Using proxy mode with fallback: {self.proxy_url}")
+        else:
+            # Direct connection only
+            connection_attempts = [
+                ('direct', None)
+            ]
+            logger.debug("🌐 Using direct connection mode")
 
-            # Stream audio and subtitle data
-            audio_data = bytearray()
+        last_error = None
 
-            async def stream_with_timeout():
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_data.extend(chunk["data"])
-                    elif chunk["type"] == "WordBoundary":
-                        # Collect word timing data
-                        word_timings.append({
-                            'text': chunk.get('text', ''),
-                            'offset': chunk.get('offset', 0),
-                            'duration': chunk.get('duration', 0)
-                        })
-                        submaker.feed(chunk)
+        for attempt_name, proxy_setting in connection_attempts:
+            try:
+                if attempt_name == 'proxy':
+                    logger.debug(f"Attempting TTS generation via proxy: {proxy_setting}")
+                else:
+                    logger.debug("Attempting TTS generation via direct connection")
 
-            # Add timeout for streaming
-            await asyncio.wait_for(stream_with_timeout(), timeout=30.0)
-
-            # Write audio file
-            with open(audio_path, "wb") as audio_file:
-                audio_file.write(audio_data)
-
-            # Generate subtitles using word timing data for precise synchronization
-            if word_timings:
-                logger.info(f"📊 Collected {len(word_timings)} word timings from edge-tts")
-                # Use word-timed subtitles for all orientations
-                subtitle_content = self._generate_word_timed_subtitles(
-                    word_timings, text, orientation
+                # Create communication object with appropriate proxy setting
+                communicate = edge_tts.Communicate(
+                    text=text,
+                    voice=voice,
+                    rate=rate,
+                    volume=volume,
+                    pitch=pitch,
+                    proxy=proxy_setting
                 )
-            else:
-                # Fallback: use edge-tts generated subtitles or time-based estimation
-                logger.warning("No word timing data available, using fallback")
-                if orientation == 'vertical':
-                    # For vertical, try edge-tts subtitles first
-                    subtitle_content = submaker.get_srt()
-                    if not subtitle_content or subtitle_content.strip() == "":
-                        # Get audio duration for fallback
+
+                # Create subtitle maker and collect word timing data
+                submaker = edge_tts.SubMaker()
+                word_timings = []  # Collect word boundary data for precise timing
+
+                # Stream audio and subtitle data
+                audio_data = bytearray()
+
+                async def stream_with_timeout():
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_data.extend(chunk["data"])
+                        elif chunk["type"] == "WordBoundary":
+                            # Collect word timing data
+                            word_timings.append({
+                                'text': chunk.get('text', ''),
+                                'offset': chunk.get('offset', 0),
+                                'duration': chunk.get('duration', 0)
+                            })
+                            submaker.feed(chunk)
+
+                # Add timeout for streaming
+                await asyncio.wait_for(stream_with_timeout(), timeout=30.0)
+
+                # Write audio file
+                with open(audio_path, "wb") as audio_file:
+                    audio_file.write(audio_data)
+
+                # Generate subtitles using word timing data for precise synchronization
+                if word_timings:
+                    logger.info(f"📊 Collected {len(word_timings)} word timings from edge-tts")
+                    # Use word-timed subtitles for all orientations
+                    subtitle_content = self._generate_word_timed_subtitles(
+                        word_timings, text, orientation
+                    )
+                else:
+                    # Fallback: use edge-tts generated subtitles or time-based estimation
+                    logger.warning("No word timing data available, using fallback")
+                    if orientation == 'vertical':
+                        # For vertical, try edge-tts subtitles first
+                        subtitle_content = submaker.get_srt()
+                        if not subtitle_content or subtitle_content.strip() == "":
+                            # Get audio duration for fallback
+                            import subprocess
+                            cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio_path]
+                            result = subprocess.run(cmd, capture_output=True, text=True)
+                            audio_duration = float(result.stdout.strip()) if result.returncode == 0 else 10.0
+                            subtitle_content = self._generate_accurate_subtitles_fallback(text, audio_duration, orientation)
+                    else:
+                        # For horizontal, get audio duration and use fallback
                         import subprocess
                         cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio_path]
                         result = subprocess.run(cmd, capture_output=True, text=True)
                         audio_duration = float(result.stdout.strip()) if result.returncode == 0 else 10.0
                         subtitle_content = self._generate_accurate_subtitles_fallback(text, audio_duration, orientation)
+
+                with open(subtitle_path, "w", encoding="utf-8") as subtitle_file:
+                    subtitle_file.write(subtitle_content)
+
+                # Success! Log which method worked
+                if attempt_name == 'proxy':
+                    logger.info(f"✅ Generated audio via PROXY successfully")
                 else:
-                    # For horizontal, get audio duration and use fallback
-                    import subprocess
-                    cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio_path]
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    audio_duration = float(result.stdout.strip()) if result.returncode == 0 else 10.0
-                    subtitle_content = self._generate_accurate_subtitles_fallback(text, audio_duration, orientation)
+                    logger.info(f"✅ Generated audio via DIRECT connection successfully")
 
-            with open(subtitle_path, "w", encoding="utf-8") as subtitle_file:
-                subtitle_file.write(subtitle_content)
+                logger.info(f"Generated audio and subtitle files with precise word-boundary timing")
+                return  # Success, exit the function
 
-            logger.info(f"Generated audio and subtitle files with precise word-boundary timing")
+            except asyncio.TimeoutError as e:
+                last_error = e
+                if attempt_name == 'proxy':
+                    logger.warning(f"⚠️  Proxy connection timed out, trying fallback...")
+                else:
+                    logger.error(f"❌ Direct connection timed out")
+                # Clean up partial files
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+                if os.path.exists(subtitle_path):
+                    os.remove(subtitle_path)
+                # Continue to next attempt
+                continue
 
-        except asyncio.TimeoutError:
-            raise Exception("Audio generation timed out after 30 seconds")
-        except Exception as e:
-            logger.error(f"Error in audio generation: {e}")
-            # Clean up partial files on error
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            if os.path.exists(subtitle_path):
-                os.remove(subtitle_path)
-            raise
+            except Exception as e:
+                last_error = e
+                if attempt_name == 'proxy':
+                    logger.warning(f"⚠️  Proxy connection failed: {str(e)[:100]}, trying fallback...")
+                else:
+                    logger.error(f"❌ Direct connection failed: {str(e)[:100]}")
+                # Clean up partial files on error
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+                if os.path.exists(subtitle_path):
+                    os.remove(subtitle_path)
+                # Continue to next attempt
+                continue
+
+        # If we get here, all attempts failed
+        if last_error:
+            if isinstance(last_error, asyncio.TimeoutError):
+                raise Exception("Audio generation timed out after 30 seconds (tried all connection methods)")
+            else:
+                raise Exception(f"Audio generation failed after trying all connection methods: {last_error}")
 
     async def generate_audio(
         self,

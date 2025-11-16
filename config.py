@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # TTS settings
     TTS_CACHE_ENABLED: bool = True
     MAX_CONCURRENT_TTS: int = 2
+    TTS_PROXY_ENABLED: bool = False
+    TTS_PROXY_URL: Optional[str] = None
 
     # Export settings
     DEFAULT_VIDEO_CODEC: str = "libx264"

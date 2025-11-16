@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "GNU AGPL v3"}
 authors = [
-    {name = "Santhosh T", email = ""},
+    {name = "Santhosh T", email = "san.phplogin@gmail.com"},
 ]
 maintainers = [
-    {name = "Santhosh T", email = ""},
+    {name = "Santhosh T", email = "san.phplogin@gmail.com"},
 ]
 keywords = [
     "voice-over",
